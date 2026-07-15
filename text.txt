@@ -1,0 +1,7 @@
+Workflow: run pnpm m:gen --name=auth to generate the class, then open it and paste the two
+CREATE EXTENSION lines as the first statements in up(). Don't hand-write the CREATE TABLEs —
+let the generator derive them from your entities so they never drift. Test both directions
+locally: pnpm m:run → pnpm m:revert → pnpm m:run (Addendum §6).
+
+
+nest g s auth/services/password --flat --no-spec
