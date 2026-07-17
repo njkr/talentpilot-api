@@ -1,105 +1,75 @@
-import { HttpException } from '@nestjs/common';
+import { AppException, ErrorCode } from './exceptions/app.exception';
 
-const BASE = 'https://talentpilot.app/errors';
-
-export class Problem extends HttpException {
-  constructor(
-    type: string,
-    title: string,
-    status: number,
-    detail?: string,
-    ext: Record<string, unknown> = {},
-  ) {
-    super({ type: `${BASE}/${type}`, title, status, detail, ...ext }, status);
-  }
-}
-
+// Auth-specific error catalogue, built on top of the shared AppException /
+// ErrorCode envelope (see common/exceptions/app.exception.ts). Centralizing
+// these here means every auth failure path throws a consistent, well-worded
+// error instead of ad-hoc NestJS exceptions scattered through the service.
 export const Problems = {
   // Deliberately identical for "no such user" and "wrong password". If they differ in
   // ANY way — code, message, status, or timing — you have a user-enumeration oracle.
   invalidCredentials: () =>
-    new Problem(
-      'invalid-credentials',
-      'Invalid credentials',
-      401,
+    new AppException(
+      ErrorCode.INVALID_CREDENTIALS,
       'Email or password is incorrect.',
     ),
 
   emailAlreadyRegistered: () =>
-    new Problem(
-      'email-already-registered',
-      'Email already registered',
-      409,
+    new AppException(
+      ErrorCode.ALREADY_EXISTS,
       'An account with this email already exists.',
     ),
 
   emailNotVerified: () =>
-    new Problem(
-      'email-not-verified',
-      'Email not verified',
-      403,
+    new AppException(
+      ErrorCode.EMAIL_NOT_VERIFIED,
       'Verify your email address to continue.',
     ),
 
   accountSuspended: () =>
-    new Problem('account-suspended', 'Account suspended', 403),
+    new AppException(ErrorCode.ACCOUNT_SUSPENDED, 'This account is suspended.'),
 
   otpInvalid: (remaining: number) =>
-    new Problem(
-      'otp-invalid',
-      'Incorrect code',
-      400,
+    new AppException(
+      ErrorCode.OTP_INVALID,
       `That code is incorrect. ${remaining} attempt(s) remaining.`,
       { remaining },
     ),
 
   otpExpired: () =>
-    new Problem(
-      'otp-expired',
-      'Code expired',
-      400,
+    new AppException(
+      ErrorCode.OTP_EXPIRED,
       'That code has expired. Request a new one.',
     ),
 
   otpMaxAttempts: () =>
-    new Problem(
-      'otp-max-attempts',
-      'Too many attempts',
-      429,
+    new AppException(
+      ErrorCode.OTP_MAX_ATTEMPTS,
       'Too many incorrect codes. Request a new one.',
     ),
 
   otpCooldown: (retryAfterSec: number) =>
-    new Problem(
-      'otp-cooldown',
-      'Please wait',
-      429,
+    new AppException(
+      ErrorCode.OTP_COOLDOWN,
       `Wait ${retryAfterSec}s before requesting another code.`,
       { retryAfterSec },
     ),
 
   refreshInvalid: () =>
-    new Problem(
-      'refresh-invalid',
-      'Session invalid',
-      401,
+    new AppException(
+      ErrorCode.TOKEN_INVALID,
       'Your session is no longer valid. Please sign in again.',
     ),
 
-  // The soft-fail for a refresh race (see §6). NOT a security event.
+  // The soft-fail for a refresh race (see AuthService.rotateRefresh). NOT a security event.
   refreshSuperseded: () =>
-    new Problem(
-      'refresh-superseded',
-      'Token superseded',
-      401,
+    new AppException(
+      ErrorCode.TOKEN_SUPERSEDED,
       'This token was just rotated. Retry with the current one.',
     ),
 
   resetTokenInvalid: () =>
-    new Problem(
-      'reset-token-invalid',
-      'Reset link invalid',
-      400,
+    new AppException(
+      ErrorCode.RESET_TOKEN_INVALID,
       'This reset link is invalid or has expired.',
     ),
 };

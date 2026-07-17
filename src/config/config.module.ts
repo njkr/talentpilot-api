@@ -5,6 +5,15 @@ import {
 } from '@nestjs/config';
 import { EnvType, validateEnv } from './env.schema';
 
+@Injectable()
+export class Env {
+  constructor(private readonly cfg: ConfigService<EnvType, true>) {}
+
+  get<K extends keyof EnvType>(k: K): EnvType[K] {
+    return this.cfg.get(k, { infer: true });
+  }
+}
+
 @Global()
 @Module({
   imports: [
@@ -14,14 +23,7 @@ import { EnvType, validateEnv } from './env.schema';
       cache: true,
     }),
   ],
+  providers: [Env],
+  exports: [Env],
 })
 export class ConfigModule {}
-
-@Injectable()
-export class Env {
-  constructor(private readonly cfg: ConfigService<EnvType, true>) {}
-
-  get<K extends keyof EnvType>(k: K): EnvType[K] {
-    return this.cfg.get(k, { infer: true });
-  }
-}

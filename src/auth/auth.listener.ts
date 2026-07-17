@@ -1,5 +1,17 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Env } from 'src/config/config.module';
+import { AuditLog } from 'src/audit/entities/audit-log.entity';
+import { ReqCtx } from 'src/common/interfaces/req-ctx.interface';
+
 @Injectable()
 export class AuthListener {
+  private readonly logger = new Logger(AuthListener.name);
+
   constructor(
     @InjectQueue('emails') private readonly emails: Queue,
     @InjectRepository(AuditLog) private readonly audit: Repository<AuditLog>,
@@ -14,6 +26,17 @@ export class AuthListener {
       vars: { code, ttlMin: this.env.get('OTP_TTL_MIN') },
     });
     await this.log(user.id, 'user.registered', ctx);
+  }
+
+  // Without this handler, resendOtp() mints a fresh code and nobody ever emails it —
+  // the user is stuck staring at an OTP screen that will never receive a code.
+  @OnEvent('otp.resend')
+  async onOtpResend({ user, code }: any) {
+    await this.emails.add('send', {
+      to: user.email,
+      template: 'verify-email',
+      vars: { code, ttlMin: this.env.get('OTP_TTL_MIN') },
+    });
   }
 
   @OnEvent('password.reset_requested')
@@ -51,8 +74,8 @@ export class AuthListener {
   private async log(
     userId: string | null,
     action: string,
-    ctx: ReqCtx,
-    meta = {},
+    ctx: ReqCtx | undefined,
+    meta: Record<string, unknown> = {},
   ) {
     try {
       await this.audit.save(
@@ -68,7 +91,7 @@ export class AuthListener {
       );
     } catch (e) {
       // Audit must NEVER break the user's action. Log and move on.
-      Logger.error({ e, action }, 'audit write failed');
+      this.logger.error(`audit write failed for ${action}`, e as Error);
     }
   }
 }

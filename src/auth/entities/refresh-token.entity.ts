@@ -40,6 +40,7 @@ export class RefreshToken {
     | 'logout'
     | 'reuse_detected'
     | 'password_reset'
+    | 'account_deleted'
     | null;
 
   // Set when this token is rotated. Presence of this + a recent revokedAt = a race, not theft.

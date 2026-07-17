@@ -1,15 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
-import { RefreshToken } from '../entities/refresh-token.entity';
-import { Env } from 'src/config/config.module';
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
-import { User } from '../entities/user.entity';
-import { JwtService } from '@nestjs/jwt';
+import { DataSource, IsNull, Repository } from 'typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { createHash, timingSafeEqual } from 'crypto';
+import { RefreshToken } from './entities/refresh-token.entity';
+import { User } from './entities/user.entity';
 import { Problems } from 'src/common/problems';
 import { PasswordService } from './services/password.service';
 import { OtpService } from './services/otp.service';
 import { TokenService } from './services/token.service';
+import { RegisterDto } from './dto/register.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { LoginDto } from './dto/login.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ReqCtx } from 'src/common/interfaces/req-ctx.interface';
 
 const REUSE_GRACE_MS = 10_000; // see rotateRefresh()
 

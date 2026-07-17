@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, IsNull, Repository } from 'typeorm';
+import { JwtService } from '@nestjs/jwt';
 import { RefreshToken } from '../entities/refresh-token.entity';
 import { Env } from 'src/config/config.module';
 import { createHash, randomBytes, randomUUID } from 'crypto';
@@ -39,7 +40,7 @@ export class TokenService {
       { sub: user.id, role: user.role, ver: user.tokenVersion },
       {
         secret: this.env.get('JWT_ACCESS_SECRET'),
-        expiresIn: this.env.get('JWT_ACCESS_TTL'),
+        expiresIn: this.env.get('JWT_ACCESS_TTL') as unknown as number,
       },
     );
   }
