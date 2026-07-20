@@ -36,6 +36,33 @@ services:
 
     command: redis-server --appendonly yes
 
+  # S3-compatible storage for local dev (Sprint 2). Same @aws-sdk/client-s3 code
+  # talks to this, real AWS S3, or Cloudflare R2 — only the env vars change.
+  minio:
+    image: minio/minio:latest
+    container_name: talentpilot-minio
+    restart: unless-stopped
+
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+
+    ports:
+      - '9000:9000' # S3 API
+      - '9001:9001' # web console
+
+    volumes:
+      - minio_data:/data
+
+    command: server /data --console-address ":9001"
+
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   redis_data:
+  minio_data:

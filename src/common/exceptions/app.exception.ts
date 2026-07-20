@@ -52,7 +52,9 @@ export const ErrorCode = {
   FILE_TYPE_UNSUPPORTED: 'FILE_TYPE_UNSUPPORTED',
   FILE_TOO_MANY_PAGES: 'FILE_TOO_MANY_PAGES',
   FILE_UNREADABLE: 'FILE_UNREADABLE', // scanned/image PDF
-  RESUME_NOT_PARSED: 'RESUME_NOT_PARSED',
+  FILE_CORRUPT: 'FILE_CORRUPT', // truncated/damaged, not just an unsupported type
+  RESUME_NOT_PARSED: 'RESUME_NOT_PARSED', // resume isn't in a usable state yet (also reused for "still processing")
+  RESUME_IN_USE: 'RESUME_IN_USE', // details: { workspaces }
 
   // billing / plan
   INSUFFICIENT_CREDITS: 'INSUFFICIENT_CREDITS', // details: { required, balance }
@@ -93,7 +95,9 @@ const STATUS: Record<string, number> = {
   FILE_TYPE_UNSUPPORTED: 422,
   FILE_TOO_MANY_PAGES: 422,
   FILE_UNREADABLE: 422,
+  FILE_CORRUPT: 422,
   RESUME_NOT_PARSED: 409,
+  RESUME_IN_USE: 409,
   INSUFFICIENT_CREDITS: 402,
   PAYMENT_FAILED: 402,
   ANALYSIS_ALREADY_RUNNING: 409,

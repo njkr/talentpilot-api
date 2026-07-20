@@ -74,9 +74,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     if (status >= 500) {
+      // Error.message/.stack are non-enumerable, so logging `ex` inside a plain object
+      // (the previous `{ err: ex, ... }` shape) JSON-stringifies to `{}` — every unhandled
+      // error was being logged with zero detail. Pull them out explicitly instead.
+      const err = ex instanceof Error ? ex : new Error(String(ex));
       this.logger.error(
-        { err: ex, requestId: req.requestId, path: req.url },
-        'unhandled',
+        `unhandled [${req.requestId}] ${req.method} ${req.url}: ${err.message}`,
+        err.stack,
       );
       // Sentry.captureException(ex, { tags: { requestId: req.requestId } });
     }

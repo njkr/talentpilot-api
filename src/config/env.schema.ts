@@ -22,6 +22,27 @@ export const envSchema = z.object({
   OTP_MAX_ATTEMPTS: z.coerce.number().default(5),
   OTP_RESEND_COOLDOWN_SEC: z.coerce.number().default(60),
   RESET_TTL_MIN: z.coerce.number().default(30),
+
+  // Storage — same vars work for AWS S3, Cloudflare R2, MinIO
+  S3_ENDPOINT: z.string().url().optional(), // omit for real AWS; set for R2/MinIO
+  S3_REGION: z.string().default('auto'),
+  S3_BUCKET: z.string(),
+  S3_ACCESS_KEY: z.string(),
+  S3_SECRET_KEY: z.string(),
+  // z.coerce.boolean(), NOT z.stringbool(), would silently coerce the STRING "false" to
+  // `true` — Boolean("false") is true in JS, since any non-empty string is truthy. That
+  // bug is exactly why SSE stayed on against MinIO even with this var set to "false".
+  S3_FORCE_PATH_STYLE: z.stringbool().default(false), // MinIO needs true
+  // SSE-S3 (AES256) at rest — real AWS S3 supports this with zero extra setup, but
+  // plain MinIO rejects it ("NotImplemented: KMS not configured") unless you stand up
+  // a KMS backend. Default true for real S3/R2; set false for local MinIO dev.
+  S3_SERVER_SIDE_ENCRYPTION: z.stringbool().default(true),
+  SIGNED_URL_TTL_SEC: z.coerce.number().default(900), // 15 min
+
+  // Upload limits
+  MAX_FILE_SIZE_MB: z.coerce.number().default(10),
+  MAX_RESUME_PAGES: z.coerce.number().default(15),
+  MIN_EXTRACTED_CHARS: z.coerce.number().default(200),
 });
 
 export type EnvType = z.infer<typeof envSchema>;

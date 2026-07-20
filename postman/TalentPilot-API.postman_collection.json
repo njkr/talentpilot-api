@@ -1,0 +1,2408 @@
+{
+  "info": {
+    "_postman_id": "cd40433b-b434-486e-b73e-1e8a8b97422e",
+    "name": "TalentPilot API — Auth, Accounts, Profiles & Resumes (Sprints 1-2)",
+    "description": "## Response envelope\nEvery 2xx response is `{ success: true, data, meta }`. Every error is `{ success: false, error: { code, message, details?, fields? }, meta }` — `code` is one of the `ErrorCode` values in `common/exceptions/app.exception.ts` (e.g. `INVALID_CREDENTIALS`, `OTP_EXPIRED`, `TOKEN_SUPERSEDED`, `PLAN_LIMIT_REACHED`, `RESUME_IN_USE`). `meta` always carries `requestId` + `timestamp`; paginated list endpoints also put `nextCursor`/`hasMore` in `meta` (not top-level).\n\n## Auth model\n- **Access token**: short-lived JWT (`JWT_ACCESS_TTL`, default 15m). Sent as `Authorization: Bearer <token>` — the collection auto-fills this from the `accessToken` variable, which Register/Verify/Login/Refresh test scripts populate automatically.\n- **Refresh token**: opaque, rotating, lives in an httpOnly `tp_rt` cookie scoped to `/api/v1/auth`. Postman's cookie jar stores and resends it automatically like a browser — nothing to configure, just run requests in order within one Postman session.\n\n## Suggested run order (folders are already in this order top to bottom)\n1. **Register** → generates a fresh `{{email}}` each run\n2. **Verify Email** → fill `otpCode` from the email/logs first (see its description for the dev caveat)\n3. **Login** — alternative to step 2 if already verified; also works pre-verification\n4. **Refresh Token** → rotates the session\n5. **Get Me** / **Update Me**\n6. **Get Profile** / **Update Profile**\n7. **Upload Resume** (select a real PDF/DOCX in the `file` field) → captures `{{resumeId}}` → **List/Get/Rename/Download/Retry Resumes** → **Delete Resume** last\n8. **List Sessions** / **Revoke Session** — do this *before* Logout, or the session you just revoked (Logout) won't be there to list\n9. **Forgot Password** → fill `resetToken`, then **Reset Password**\n10. **Logout** / **Delete Me** — destructive/terminal, kept last on purpose\n\n## Resumes notes\n- Upload requires a **verified** email and a free plan slot (max 3 resumes/user) — both surface as 403.\n- Text extraction happens on the separate **worker** process (`pnpm start:worker`) — if a resume sits at `uploaded` forever, the worker isn't running, not a bug.\n- Storage is MinIO locally (`docker compose up -d minio`) — the same code talks to real AWS S3 or Cloudflare R2 in other environments.\n\nImport `TalentPilot-API.postman_environment.json` alongside this collection and select it as your active environment before running anything.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth / Registration & Verification",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fresh email every run so Register doesn't 409 on a re-run.",
+                  "const email = `test.${Date.now()}@example.com`;",
+                  "pm.environment.set('email', email); pm.collectionVariables.set('email', email);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Envelope has success:true and the new user', () => {",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data).to.have.property('id');",
+                  "  pm.expect(json.data.email).to.eql(pm.variables.get('email'));",
+                  "});",
+                  "if (json.success) pm.environment.set('userId', json.data.id); pm.collectionVariables.set('userId', json.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Creates an unverified account and emails a 6-digit OTP (see `verify-email`). Deliberately returns 409 if the email is already registered — that surface is defended by rate limiting (5/min/IP), not by lying, so the frontend can tell the user their email is taken. Password needs at least one letter and one digit, 8-72 chars.\n\n**Dev note:** with a placeholder `RESEND_API_KEY` in `.env`, the verification email will fail to send and the OTP job will retry and eventually die in BullMQ — there is currently no way to read the code back out short of a real Resend key or a temporary log statement in `OtpService.issueOtp`. Configure a real key to exercise `verify-email` end to end.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane@example.com\",\n  \"password\": \"Sup3rSecret!\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/register",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "register"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"5f6e2f0a-8e3a-4b7a-9d3e-1a2b3c4d5e6f\",\n    \"email\": \"jane@example.com\",\n    \"isVerified\": false,\n    \"role\": \"user\",\n    \"createdAt\": \"2026-07-17T09:10:02.551Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — email already registered",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane@example.com\",\n  \"password\": \"Sup3rSecret!\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/register",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "register"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"ALREADY_EXISTS\",\n    \"message\": \"An account with this email already exists.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request — weak password",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane@example.com\",\n  \"password\": \"short\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/register",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "register"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"Validation failed.\",\n    \"fields\": {\n      \"password\": [\n        \"password must be longer than or equal to 8 characters\",\n        \"password must contain a number\"\n      ]\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Verify Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set('accessToken', json.data.accessToken); pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "  pm.test('Access token captured', () => pm.expect(json.data.accessToken).to.be.a('string'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"code\": \"{{otpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "verify-email"
+              ]
+            },
+            "description": "Consumes the 6-digit OTP and logs you straight in — set `otpCode` from the email before running this. Idempotent for an already-verified account (just logs in). On success, sets the `tp_rt` httpOnly refresh cookie (Postman stores it automatically) and returns an access token.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane@example.com\",\n  \"code\": \"482913\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/verify-email",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "verify-email"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"accessToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZjZlMmYwYS04ZTNhLTRiN2EtOWQzZS0xYTJiM2M0ZDVlNmYiLCJyb2xlIjoidXNlciIsInZlciI6MCwiaWF0IjoxNzUyNzQ4NTMyLCJleHAiOjE3NTI3NDk0MzJ9.9xQZ0k2m3n4p5q6r7s8t9u0v1w2x3y4z5a6b7c8d9e0\",\n    \"user\": {\n      \"id\": \"5f6e2f0a-8e3a-4b7a-9d3e-1a2b3c4d5e6f\",\n      \"email\": \"{{email}}\",\n      \"isVerified\": true,\n      \"role\": \"user\",\n      \"createdAt\": \"2026-07-17T09:10:02.551Z\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request — wrong code",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane@example.com\",\n  \"code\": \"000000\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/verify-email",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "verify-email"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"OTP_INVALID\",\n    \"message\": \"That code is incorrect. 4 attempt(s) remaining.\",\n    \"details\": {\n      \"remaining\": 4\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Resend OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/resend-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "resend-otp"
+              ]
+            },
+            "description": "Always returns 204, even for an unknown or already-verified email — existence is never revealed. Subject to a per-account cooldown (`OTP_RESEND_COOLDOWN_SEC`, default 60s) on top of the 3/min/IP rate limit.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane@example.com\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/resend-otp",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "resend-otp"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "429 Too Many Requests — cooldown",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane@example.com\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/resend-otp",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "resend-otp"
+                  ]
+                }
+              },
+              "status": "Too Many Requests",
+              "code": 429,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"OTP_COOLDOWN\",\n    \"message\": \"Wait 42s before requesting another code.\",\n    \"details\": {\n      \"retryAfterSec\": 42\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth / Login & Refresh",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set('accessToken', json.data.accessToken); pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "  pm.test('Access token captured', () => pm.expect(json.data.accessToken).to.be.a('string'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Unverified users can still log in (VerifiedGuard blocks specific routes separately). Unknown email and wrong password return an identical 401 body in identical time — no user-enumeration oracle. Rate limited to 5/min/IP. Sets the `tp_rt` refresh cookie.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane@example.com\",\n  \"password\": \"Sup3rSecret!\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "login"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"accessToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZjZlMmYwYS04ZTNhLTRiN2EtOWQzZS0xYTJiM2M0ZDVlNmYiLCJyb2xlIjoidXNlciIsInZlciI6MCwiaWF0IjoxNzUyNzQ4NTMyLCJleHAiOjE3NTI3NDk0MzJ9.9xQZ0k2m3n4p5q6r7s8t9u0v1w2x3y4z5a6b7c8d9e0\",\n    \"user\": {\n      \"id\": \"5f6e2f0a-8e3a-4b7a-9d3e-1a2b3c4d5e6f\",\n      \"email\": \"{{email}}\",\n      \"isVerified\": true,\n      \"role\": \"user\",\n      \"createdAt\": \"2026-07-17T09:10:02.551Z\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "401 Unauthorized — invalid credentials",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane@example.com\",\n  \"password\": \"WrongPassword1\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "login"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"INVALID_CREDENTIALS\",\n    \"message\": \"Email or password is incorrect.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "403 Forbidden — account suspended",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"suspended@example.com\",\n  \"password\": \"Sup3rSecret!\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "login"
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"ACCOUNT_SUSPENDED\",\n    \"message\": \"This account is suspended.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set('accessToken', json.data.accessToken); pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "  pm.test('New access token captured', () => pm.expect(json.data.accessToken).to.be.a('string'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "No body — reads the `tp_rt` httpOnly cookie set by Register/Verify/Login, which Postman's cookie jar sends automatically as long as you've run one of those first in this session. Rotates the token and returns a new access token. Two concurrent refreshes with the same token are a race, not theft: the loser gets a soft 401 `TOKEN_SUPERSEDED` and should retry with its current token, not log out. A token replayed long after rotation is treated as theft and the whole device family is revoked (`TOKEN_INVALID`).",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/refresh",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "refresh"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"accessToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZjZlMmYwYS04ZTNhLTRiN2EtOWQzZS0xYTJiM2M0ZDVlNmYiLCJyb2xlIjoidXNlciIsInZlciI6MCwiaWF0IjoxNzUyNzQ4NTMyLCJleHAiOjE3NTI3NDk0MzJ9.9xQZ0k2m3n4p5q6r7s8t9u0v1w2x3y4z5a6b7c8d9e0\",\n    \"user\": {\n      \"id\": \"5f6e2f0a-8e3a-4b7a-9d3e-1a2b3c4d5e6f\",\n      \"email\": \"{{email}}\",\n      \"isVerified\": true,\n      \"role\": \"user\",\n      \"createdAt\": \"2026-07-17T09:10:02.551Z\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "401 Unauthorized — no/invalid/expired cookie",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/refresh",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "refresh"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"TOKEN_INVALID\",\n    \"message\": \"Your session is no longer valid. Please sign in again.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "401 Unauthorized — concurrent refresh race (soft, retry)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/refresh",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "refresh"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"TOKEN_SUPERSEDED\",\n    \"message\": \"This token was just rotated. Retry with the current one.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get Me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            },
+            "description": "\"Who am I\" — the frontend calls this on every app load.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/users/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "users",
+                    "me"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"5f6e2f0a-8e3a-4b7a-9d3e-1a2b3c4d5e6f\",\n    \"email\": \"{{email}}\",\n    \"isVerified\": true,\n    \"role\": \"user\",\n    \"createdAt\": \"2026-07-17T09:10:02.551Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "401 Unauthorized — missing/invalid access token",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/users/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "users",
+                    "me"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"TOKEN_INVALID\",\n    \"message\": \"Not authenticated.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Me",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            },
+            "description": "Placeholder: the users table has no self-editable columns yet, so this always returns the account unchanged (see `UpdateUserDto`). `forbidNonWhitelisted` rejects any body property you send here, so keep the body an empty object. Password changes go through the auth reset flow, never this endpoint.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/users/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "users",
+                    "me"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"5f6e2f0a-8e3a-4b7a-9d3e-1a2b3c4d5e6f\",\n    \"email\": \"{{email}}\",\n    \"isVerified\": true,\n    \"role\": \"user\",\n    \"createdAt\": \"2026-07-17T09:10:02.551Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Profiles",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/profiles/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profiles",
+                "me"
+              ]
+            },
+            "description": "Returns an empty shell (every field `null`, `completeness: 0`) if the user has never saved a profile — this is never a 404, so the frontend's settings form always has something to bind to.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — never saved a profile yet",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/profiles/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "profiles",
+                    "me"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"firstName\": null,\n    \"lastName\": null,\n    \"phone\": null,\n    \"linkedin\": null,\n    \"github\": null,\n    \"portfolio\": null,\n    \"country\": null,\n    \"city\": null,\n    \"timezone\": null,\n    \"yearsExperience\": null,\n    \"targetRole\": null,\n    \"salaryExpectation\": null,\n    \"salaryCurrency\": null,\n    \"completeness\": 0\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "200 OK — existing profile",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/profiles/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "profiles",
+                    "me"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"firstName\": \"Jane\",\n    \"lastName\": \"Doe\",\n    \"phone\": \"+1 415 555 0100\",\n    \"linkedin\": \"https://linkedin.com/in/janedoe\",\n    \"github\": \"https://github.com/janedoe\",\n    \"portfolio\": \"https://janedoe.dev\",\n    \"country\": \"United States\",\n    \"city\": \"San Francisco\",\n    \"timezone\": \"America/Los_Angeles\",\n    \"yearsExperience\": 5,\n    \"targetRole\": \"Senior Backend Engineer\",\n    \"salaryExpectation\": 150000,\n    \"salaryCurrency\": \"USD\",\n    \"completeness\": 100\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"phone\": \"+1 415 555 0100\",\n  \"linkedin\": \"https://linkedin.com/in/janedoe\",\n  \"github\": \"https://github.com/janedoe\",\n  \"portfolio\": \"https://janedoe.dev\",\n  \"country\": \"United States\",\n  \"city\": \"San Francisco\",\n  \"timezone\": \"America/Los_Angeles\",\n  \"yearsExperience\": 5,\n  \"targetRole\": \"Senior Backend Engineer\",\n  \"salaryExpectation\": 150000,\n  \"salaryCurrency\": \"USD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/profiles/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profiles",
+                "me"
+              ]
+            },
+            "description": "PUT, not PATCH — but it is still an upsert of individual fields: works whether or not a profile row exists yet, and any field you omit is left untouched, not cleared. `linkedin`/`github` are validated against their real hosts (a URL that isn't actually on linkedin.com/github.com is rejected), so the frontend never renders a \"LinkedIn\" link pointing at a random site.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/profiles/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "profiles",
+                    "me"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"firstName\": \"Jane\",\n    \"lastName\": \"Doe\",\n    \"phone\": \"+1 415 555 0100\",\n    \"linkedin\": \"https://linkedin.com/in/janedoe\",\n    \"github\": \"https://github.com/janedoe\",\n    \"portfolio\": \"https://janedoe.dev\",\n    \"country\": \"United States\",\n    \"city\": \"San Francisco\",\n    \"timezone\": \"America/Los_Angeles\",\n    \"yearsExperience\": 5,\n    \"targetRole\": \"Senior Backend Engineer\",\n    \"salaryExpectation\": 150000,\n    \"salaryCurrency\": \"USD\",\n    \"completeness\": 100\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request — linkedin URL is not actually on linkedin.com",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"linkedin\": \"https://not-linkedin.example.com/in/janedoe\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/profiles/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "profiles",
+                    "me"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"Validation failed.\",\n    \"fields\": {\n      \"linkedin\": [\n        \"linkedin must be a URL address\"\n      ]\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Resumes",
+      "item": [
+        {
+          "name": "Upload Resume",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set('resumeId', json.data.id); pm.collectionVariables.set('resumeId', json.data.id);",
+                  "  pm.test('Resume id captured', () => pm.expect(json.data.id).to.be.a('string'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/resumes/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "upload"
+              ]
+            },
+            "description": "PDF or DOCX only, validated by magic bytes — never trusts the file extension or the `Content-Type` the browser sends. Re-uploading a byte-identical file returns the existing resume instead of creating a duplicate (dedupe by content hash). Kicks off text extraction on the **worker** process — the response comes back at status `uploaded`; poll `GET /resumes/{id}` to watch it walk `uploaded → extracting → extracted` (or `failed`, with a human-readable `parseError`).\n\nRequires a verified email (`VerifiedGuard`) and a free plan slot (max 3 resumes) — both surface as 403. Rate limited to 10/hour.\n\n**In Postman:** click \"Select Files\" on the `file` form field before sending.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "file",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/upload",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "upload"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{resumeId}}\",\n    \"title\": \"Alice Johnson Resume\",\n    \"status\": \"uploaded\",\n    \"pageCount\": null,\n    \"wordCount\": null,\n    \"fileSize\": 1208,\n    \"language\": null,\n    \"parseError\": null,\n    \"createdAt\": \"2026-07-20T12:24:44.947Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "403 Forbidden — plan limit reached",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "file",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/upload",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "upload"
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"PLAN_LIMIT_REACHED\",\n    \"message\": \"Your plan allows 3 resumes. Upgrade to add more.\",\n    \"details\": {\n      \"feature\": \"resumes\",\n      \"limit\": 3,\n      \"current\": 3\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "422 Unprocessable Entity — not a real PDF/DOCX",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "file",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/upload",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "upload"
+                  ]
+                }
+              },
+              "status": "Unprocessable Entity",
+              "code": 422,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"FILE_TYPE_UNSUPPORTED\",\n    \"message\": \"Upload a PDF or DOCX file.\",\n    \"details\": {\n      \"detected\": \"application/x-msdownload\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "413 Payload Too Large",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "file",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/upload",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "upload"
+                  ]
+                }
+              },
+              "status": "Payload Too Large",
+              "code": 413,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"FILE_TOO_LARGE\",\n    \"message\": \"Resumes must be under 10 MB.\",\n    \"details\": {\n      \"maxMb\": 10\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Resumes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resumes?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Cursor-paginated, newest first. `rawText` is never included in the list — fetch a single resume for that. Pass the previous page's `meta.nextCursor` as `?cursor=` to continue.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"{{resumeId}}\",\n      \"title\": \"Alice Johnson Resume\",\n      \"status\": \"extracted\",\n      \"pageCount\": 1,\n      \"wordCount\": 71,\n      \"fileSize\": 1208,\n      \"language\": \"en\",\n      \"parseError\": null,\n      \"createdAt\": \"2026-07-20T12:24:44.947Z\"\n    },\n    {\n      \"id\": \"2a95a94f-19e7-4990-a2b3-72e12592e8df\",\n      \"title\": \"Old Resume\",\n      \"status\": \"uploaded\",\n      \"pageCount\": null,\n      \"wordCount\": null,\n      \"fileSize\": 1208,\n      \"language\": null,\n      \"parseError\": null,\n      \"createdAt\": \"2026-07-20T12:24:44.947Z\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\",\n    \"nextCursor\": null,\n    \"hasMore\": false\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Resume",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}"
+              ]
+            },
+            "description": "A foreign id (belongs to another user) 404s — never 403, which would confirm the resource exists.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/3836e6cc-e4fc-45c7-a8eb-eb1660da11ae",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "3836e6cc-e4fc-45c7-a8eb-eb1660da11ae"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{resumeId}}\",\n    \"title\": \"Alice Johnson Resume\",\n    \"status\": \"extracted\",\n    \"pageCount\": 1,\n    \"wordCount\": 71,\n    \"fileSize\": 1208,\n    \"language\": \"en\",\n    \"parseError\": null,\n    \"createdAt\": \"2026-07-20T12:24:44.947Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/00000000-0000-0000-0000-000000000000",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "00000000-0000-0000-0000-000000000000"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"Not Found\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Rename Resume",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Senior Backend Engineer — 2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Senior Backend Engineer — 2026\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/3836e6cc-e4fc-45c7-a8eb-eb1660da11ae",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "3836e6cc-e4fc-45c7-a8eb-eb1660da11ae"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{resumeId}}\",\n    \"title\": \"Senior Backend Engineer — 2026\",\n    \"status\": \"extracted\",\n    \"pageCount\": 1,\n    \"wordCount\": 71,\n    \"fileSize\": 1208,\n    \"language\": \"en\",\n    \"parseError\": null,\n    \"createdAt\": \"2026-07-20T12:24:44.947Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Download Resume",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}",
+                "download"
+              ]
+            },
+            "description": "The API never streams file bytes itself — this 302-redirects to a short-lived `SIGNED_URL_TTL_SEC` (default 15min) presigned URL that the browser/client fetches directly from storage.\n\n**Auto-follow-redirect is disabled on this request on purpose.** The presigned URL IS the auth for that request — MinIO/S3 reject it if an unrelated `Authorization: Bearer ...` header rides along, which Postman/Newman would otherwise attach since it forwards headers across redirects by default even to a completely different host. Expect a `302` here with a `Location` header; copy that URL into a new tab (or a fresh request with no auth) to actually fetch the file.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "302 Found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/3836e6cc-e4fc-45c7-a8eb-eb1660da11ae/download",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "3836e6cc-e4fc-45c7-a8eb-eb1660da11ae",
+                    "download"
+                  ]
+                }
+              },
+              "status": "Found",
+              "code": 302,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "Location",
+                  "value": "http://localhost:9000/talentpilot-resumes/users/.../original.pdf?X-Amz-Signature=..."
+                }
+              ],
+              "cookie": [],
+              "body": ""
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "Retry Extraction",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}/retry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}",
+                "retry"
+              ]
+            },
+            "description": "Only valid when status is `failed` — resets to `uploaded` and re-queues text extraction on the worker.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/3836e6cc-e4fc-45c7-a8eb-eb1660da11ae/retry",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "3836e6cc-e4fc-45c7-a8eb-eb1660da11ae",
+                    "retry"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{resumeId}}\",\n    \"title\": \"Alice Johnson Resume\",\n    \"status\": \"uploaded\",\n    \"pageCount\": null,\n    \"wordCount\": null,\n    \"fileSize\": 1208,\n    \"language\": null,\n    \"parseError\": null,\n    \"createdAt\": \"2026-07-20T12:24:44.947Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — resume is not in a failed state",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/3836e6cc-e4fc-45c7-a8eb-eb1660da11ae/retry",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "3836e6cc-e4fc-45c7-a8eb-eb1660da11ae",
+                    "retry"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"RESUME_NOT_PARSED\",\n    \"message\": \"This resume is still being processed (status: extracted).\",\n    \"details\": {\n      \"status\": \"extracted\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Resume",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}"
+              ]
+            },
+            "description": "Soft delete. Blocked with 409 if any workspace still references this resume — the error body lists exactly which ones, so it is actionable instead of a dead end. **Destructive** — run after the other Resumes requests, not before.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/3836e6cc-e4fc-45c7-a8eb-eb1660da11ae",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "3836e6cc-e4fc-45c7-a8eb-eb1660da11ae"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — RESUME_IN_USE",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/3836e6cc-e4fc-45c7-a8eb-eb1660da11ae",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "3836e6cc-e4fc-45c7-a8eb-eb1660da11ae"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"RESUME_IN_USE\",\n    \"message\": \"This resume is used by 1 workspace(s). Delete those first.\",\n    \"details\": {\n      \"workspaces\": [\n        {\n          \"id\": \"ws-1\",\n          \"name\": \"My workspace\"\n        }\n      ]\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth / Sessions",
+      "item": [
+        {
+          "name": "List Sessions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success && json.data.length) {",
+                  "  pm.environment.set('familyId', json.data[0].familyId); pm.collectionVariables.set('familyId', json.data[0].familyId);",
+                  "  pm.test('familyId captured for Revoke Session', () => pm.expect(json.data[0].familyId).to.be.a('string'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "sessions"
+              ]
+            },
+            "description": "One row per active refresh-token family — a \"manage devices\" screen.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/sessions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "sessions"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"familyId\": \"9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d\",\n      \"createdAt\": \"2026-07-17T09:10:05.221Z\",\n      \"ip\": \"203.0.113.7\",\n      \"userAgent\": \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)\"\n    },\n    {\n      \"familyId\": \"1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d\",\n      \"createdAt\": \"2026-07-15T18:42:11.009Z\",\n      \"ip\": \"198.51.100.23\",\n      \"userAgent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64)\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Revoke Session",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/sessions/{{familyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "sessions",
+                "{{familyId}}"
+              ]
+            },
+            "description": "Revokes the whole family identified by `familyId` (from List Sessions) — signs that device out.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/sessions/9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "sessions",
+                    "9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — not your session",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/sessions/00000000-0000-0000-0000-000000000000",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "sessions",
+                    "00000000-0000-0000-0000-000000000000"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"Not Found\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth / Password Reset",
+      "item": [
+        {
+          "name": "Forgot Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "forgot-password"
+              ]
+            },
+            "description": "Always returns 204 — existence of the email is never revealed. Emails a single-use reset link/token (`RESET_TTL_MIN`, default 30min). Rate limited to 5/min/IP.\n\n**Dev note:** same caveat as Register — with a placeholder Resend key you will not receive the email. Set `resetToken` manually (e.g. from server logs or a real Resend key) before running Reset Password.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"jane@example.com\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/forgot-password",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "forgot-password"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"password\": \"{{newPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "reset-password"
+              ]
+            },
+            "description": "Consumes the single-use reset token, rehashes the password, bumps `tokenVersion` (every live access token is instantly invalid, not just at its 15-minute expiry), and revokes every refresh token — this is \"log out everywhere\" by construction.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"token\": \"a1b2c3...\",\n  \"password\": \"NewSup3rSecret!\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/reset-password",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "reset-password"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request — invalid/expired token",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"token\": \"stale-or-wrong-token\",\n  \"password\": \"NewSup3rSecret!\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/reset-password",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "reset-password"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"RESET_TOKEN_INVALID\",\n    \"message\": \"This reset link is invalid or has expired.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth / Logout & Account Deletion",
+      "item": [
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Revokes the whole refresh-token family (not just the current token) and clears the `tp_rt` cookie. Idempotent — calling it with no/expired cookie still returns 204.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/logout",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "logout"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Me",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            },
+            "description": "GDPR soft delete: blocks login immediately, revokes every session, sets `deletedAt`. The account is excluded from normal queries but kept for a 30-day grace window before a scheduled hard purge (a later sprint). **Destructive for this test user** — run it last.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/users/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "users",
+                    "me"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Sup3rSecret!",
+      "type": "string"
+    },
+    {
+      "key": "newPassword",
+      "value": "NewSup3rSecret!",
+      "type": "string"
+    },
+    {
+      "key": "otpCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "resetToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "familyId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "resumeId",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

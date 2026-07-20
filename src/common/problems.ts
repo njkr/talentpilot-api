@@ -72,4 +72,62 @@ export const Problems = {
       ErrorCode.RESET_TOKEN_INVALID,
       'This reset link is invalid or has expired.',
     ),
+
+  // ── Sprint 2: resumes & storage ──────────────────────────────────────────
+  fileTooLarge: (maxMb: number) =>
+    new AppException(
+      ErrorCode.FILE_TOO_LARGE,
+      `Resumes must be under ${maxMb} MB.`,
+      { maxMb },
+    ),
+
+  fileTypeUnsupported: (detected?: string) =>
+    new AppException(
+      ErrorCode.FILE_TYPE_UNSUPPORTED,
+      'Upload a PDF or DOCX file.',
+      {
+        detected,
+      },
+    ),
+
+  fileTooManyPages: (pages: number, max: number) =>
+    new AppException(
+      ErrorCode.FILE_TOO_MANY_PAGES,
+      `This file has ${pages} pages; the maximum is ${max}.`,
+      { pages, max },
+    ),
+
+  fileUnreadable: () =>
+    new AppException(
+      ErrorCode.FILE_UNREADABLE,
+      'This looks like a scanned document or an image-only PDF. ' +
+        'Please upload a text-based PDF or a DOCX file.',
+    ),
+
+  fileCorrupt: () =>
+    new AppException(
+      ErrorCode.FILE_CORRUPT,
+      'This file appears to be damaged. Try re-exporting it and uploading again.',
+    ),
+
+  resumeNotReady: (status: string) =>
+    new AppException(
+      ErrorCode.RESUME_NOT_PARSED,
+      `This resume is still being processed (status: ${status}).`,
+      { status },
+    ),
+
+  resumeInUse: (workspaces: { id: string; name: string }[]) =>
+    new AppException(
+      ErrorCode.RESUME_IN_USE,
+      `This resume is used by ${workspaces.length} workspace(s). Delete those first.`,
+      { workspaces },
+    ),
+
+  planLimitReached: (feature: string, limit: number, current: number) =>
+    new AppException(
+      ErrorCode.PLAN_LIMIT_REACHED,
+      `Your plan allows ${limit} ${feature}. Upgrade to add more.`,
+      { feature, limit, current },
+    ),
 };

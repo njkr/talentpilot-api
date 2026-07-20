@@ -8,24 +8,29 @@
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start": "concurrently -n API,WORKER -c blue,magenta -k \"npm:start:api\" \"npm:start:worker\"",
+    "start:api": "nest start",
+    "start:dev": "concurrently -n API,WORKER -c blue,magenta -k \"npm:start:api:dev\" \"npm:start:worker:dev\"",
+    "start:api:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
+    "start:prod": "concurrently -n API,WORKER -c blue,magenta -k \"npm:start:api:prod\" \"npm:start:worker:prod\"",
+    "start:api:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
-    "test": "jest",
+    "test": "jest --runInBand",
     "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
+    "test:cov": "jest --coverage --runInBand",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "start:worker": "ts-node -r tsconfig-paths/register src/main.worker.ts",
-    "start:worker:dev": "nest start main.worker --watch",
+    "start:worker:dev": "ts-node-dev --respawn -r tsconfig-paths/register src/main.worker.ts",
     "start:worker:prod": "node dist/main.worker.js",
     "m:gen": "node scripts/gen-migration.js",
     "m:run": "typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
     "m:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1090.0",
+    "@aws-sdk/s3-request-presigner": "^3.1090.0",
     "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^10.0.0",
     "@nestjs/config": "^4.0.4",
@@ -46,9 +51,13 @@
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.1",
+    "franc-min": "^6.2.0",
     "ioredis": "^5.11.1",
+    "mammoth": "^1.12.0",
+    "multer": "^2.2.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.22.0",
     "reflect-metadata": "^0.2.0",
     "resend": "^6.17.2",
@@ -63,10 +72,12 @@
     "@types/cookie-parser": "^1.4.9",
     "@types/express": "^4.17.17",
     "@types/jest": "^29.5.2",
+    "@types/multer": "^2.2.0",
     "@types/node": "^20.3.1",
     "@types/supertest": "^6.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
+    "concurrently": "^10.0.3",
     "eslint": "^8.42.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-prettier": "^5.0.0",
@@ -77,6 +88,7 @@
     "ts-jest": "^29.1.0",
     "ts-loader": "^9.4.3",
     "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.1.3"
   },
@@ -89,7 +101,12 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.(t|j)s$": [
+        "ts-jest",
+        {
+          "isolatedModules": true
+        }
+      ]
     },
     "moduleNameMapper": {
       "^src/(.*)$": "<rootDir>/$1"

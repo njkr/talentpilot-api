@@ -9,6 +9,8 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AuditModule } from './audit/audit.module';
+import { ProfilesModule } from './profiles/profiles.module';
+import { ResumesModule } from './resumes/resumes.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
@@ -40,6 +42,8 @@ import { dataSourceOptions } from './database/data-source';
     UsersModule,
     NotificationsModule, // owns the `emails` queue + EmailProcessor
     AuditModule,
+    ProfilesModule,
+    ResumesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard }, // protected by default (§7)
