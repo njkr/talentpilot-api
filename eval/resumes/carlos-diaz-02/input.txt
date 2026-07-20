@@ -1,0 +1,16 @@
+Carlos Diaz
+carlos.diaz@mail.com
+
+Frontend Developer with 2 years of experience building React applications.
+
+TECHNICAL SKILLS
+JavaScript, React, CSS, HTML, Git
+
+WORK EXPERIENCE
+Frontend Developer, Bright Labs, Remote
+March 2023 - Present
+- Rebuilt the marketing site in React, improving Lighthouse performance score from 61 to 94
+- Implemented a component library used across 3 internal products
+
+EDUCATION
+Associate Degree in Web Development, Riverside Community College, 2022

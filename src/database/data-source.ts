@@ -6,7 +6,10 @@ import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { Profile } from '../profiles/entities/profile.entity';
 import { Resume } from '../resumes/entities/resume.entity';
+import { ResumeSection } from '../resumes/entities/resume-section.entity';
 import { Workspace } from '../workspaces/entities/workspace.entity';
+import { PromptTemplate } from '../prompts/entities/prompt-template.entity';
+import { TokenUsage } from '../ai/entities/token-usage.entity';
 
 // Single source of truth for the DB connection, shared by:
 //  - the Nest app (via TypeOrmModule.forRootAsync in app.module.ts)
@@ -24,7 +27,10 @@ export const dataSourceOptions: DataSourceOptions = {
     AuditLog,
     Profile,
     Resume,
+    ResumeSection,
     Workspace,
+    PromptTemplate,
+    TokenUsage,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   synchronize: false, // migrations only — see Sprint 1 §2

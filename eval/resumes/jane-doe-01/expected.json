@@ -1,0 +1,14 @@
+{
+  "personalInfo": {
+    "fullName": "Jane Doe",
+    "email": "jane.doe@example.com",
+    "phone": "(555) 123-4567",
+    "location": "Austin, TX"
+  },
+  "skillsInclude": ["Go", "TypeScript", "PostgreSQL", "Kubernetes", "AWS"],
+  "minExperienceEntries": 2,
+  "minEducationEntries": 1,
+  "minCertificationEntries": 1,
+  "minLanguageEntries": 2,
+  "firstJobIsCurrent": true
+}

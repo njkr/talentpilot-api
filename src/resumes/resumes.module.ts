@@ -5,17 +5,20 @@ import { MulterModule } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { Env } from 'src/config/config.module';
 import { Resume } from './entities/resume.entity';
+import { ResumeSection } from './entities/resume-section.entity';
 import { Workspace } from 'src/workspaces/entities/workspace.entity';
 import { StorageModule } from 'src/storage/storage.module';
 import { ResumesController } from './resumes.controller';
+import { SectionsController } from './sections.controller';
 import { ResumesService } from './resumes.service';
+import { SectionsService } from './services/sections.service';
 import { FileValidatorService } from './services/file-validator.service';
 import { TextExtractorService } from './services/text-extractor.service';
 import { PlanLimitService } from 'src/subscriptions/plan-limit.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Resume, Workspace]),
+    TypeOrmModule.forFeature([Resume, Workspace, ResumeSection]),
     StorageModule,
     BullModule.registerQueue({ name: 'resumes' }), // API side: lets the service enqueue
     // Registered here (not inline on @UseInterceptors) so the size limit actually reads
@@ -33,9 +36,10 @@ import { PlanLimitService } from 'src/subscriptions/plan-limit.service';
       inject: [Env],
     }),
   ],
-  controllers: [ResumesController],
+  controllers: [ResumesController, SectionsController],
   providers: [
     ResumesService,
+    SectionsService,
     FileValidatorService,
     TextExtractorService,
     PlanLimitService,

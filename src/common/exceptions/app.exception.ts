@@ -67,6 +67,9 @@ export const ErrorCode = {
   RUN_NOT_RETRYABLE: 'RUN_NOT_RETRYABLE',
   AI_PROVIDER_UNAVAILABLE: 'AI_PROVIDER_UNAVAILABLE',
   AI_BUDGET_EXCEEDED: 'AI_BUDGET_EXCEEDED',
+  AI_OUTPUT_INVALID: 'AI_OUTPUT_INVALID', // model output failed schema validation twice
+  AI_CONTEXT_TOO_LONG: 'AI_CONTEXT_TOO_LONG', // input exceeds the model's context window
+  AI_CONTENT_FILTERED: 'AI_CONTENT_FILTERED', // provider refused the content
 
   // platform
   RATE_LIMITED: 'RATE_LIMITED', // details: { retryAfterSec }
@@ -105,6 +108,9 @@ const STATUS: Record<string, number> = {
   RUN_NOT_RETRYABLE: 409,
   AI_PROVIDER_UNAVAILABLE: 503,
   AI_BUDGET_EXCEEDED: 429,
+  AI_OUTPUT_INVALID: 502,
+  AI_CONTEXT_TOO_LONG: 422,
+  AI_CONTENT_FILTERED: 422,
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
 };

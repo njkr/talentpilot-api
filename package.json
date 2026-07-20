@@ -26,7 +26,9 @@
     "start:worker:prod": "node dist/main.worker.js",
     "m:gen": "node scripts/gen-migration.js",
     "m:run": "typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
-    "m:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts"
+    "m:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts",
+    "seed:prompts": "ts-node -r tsconfig-paths/register scripts/seed-prompts.ts",
+    "eval:parser": "ts-node -r tsconfig-paths/register scripts/eval-parser.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1090.0",
@@ -53,8 +55,11 @@
     "dotenv": "^17.4.1",
     "franc-min": "^6.2.0",
     "ioredis": "^5.11.1",
+    "js-tiktoken": "^1.0.21",
     "mammoth": "^1.12.0",
     "multer": "^2.2.0",
+    "openai": "^6.48.0",
+    "p-limit": "^7.3.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pdf-parse": "^2.4.5",

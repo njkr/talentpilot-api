@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "cd40433b-b434-486e-b73e-1e8a8b97422e",
-    "name": "TalentPilot API — Auth, Accounts, Profiles & Resumes (Sprints 1-2)",
-    "description": "## Response envelope\nEvery 2xx response is `{ success: true, data, meta }`. Every error is `{ success: false, error: { code, message, details?, fields? }, meta }` — `code` is one of the `ErrorCode` values in `common/exceptions/app.exception.ts` (e.g. `INVALID_CREDENTIALS`, `OTP_EXPIRED`, `TOKEN_SUPERSEDED`, `PLAN_LIMIT_REACHED`, `RESUME_IN_USE`). `meta` always carries `requestId` + `timestamp`; paginated list endpoints also put `nextCursor`/`hasMore` in `meta` (not top-level).\n\n## Auth model\n- **Access token**: short-lived JWT (`JWT_ACCESS_TTL`, default 15m). Sent as `Authorization: Bearer <token>` — the collection auto-fills this from the `accessToken` variable, which Register/Verify/Login/Refresh test scripts populate automatically.\n- **Refresh token**: opaque, rotating, lives in an httpOnly `tp_rt` cookie scoped to `/api/v1/auth`. Postman's cookie jar stores and resends it automatically like a browser — nothing to configure, just run requests in order within one Postman session.\n\n## Suggested run order (folders are already in this order top to bottom)\n1. **Register** → generates a fresh `{{email}}` each run\n2. **Verify Email** → fill `otpCode` from the email/logs first (see its description for the dev caveat)\n3. **Login** — alternative to step 2 if already verified; also works pre-verification\n4. **Refresh Token** → rotates the session\n5. **Get Me** / **Update Me**\n6. **Get Profile** / **Update Profile**\n7. **Upload Resume** (select a real PDF/DOCX in the `file` field) → captures `{{resumeId}}` → **List/Get/Rename/Download/Retry Resumes** → **Delete Resume** last\n8. **List Sessions** / **Revoke Session** — do this *before* Logout, or the session you just revoked (Logout) won't be there to list\n9. **Forgot Password** → fill `resetToken`, then **Reset Password**\n10. **Logout** / **Delete Me** — destructive/terminal, kept last on purpose\n\n## Resumes notes\n- Upload requires a **verified** email and a free plan slot (max 3 resumes/user) — both surface as 403.\n- Text extraction happens on the separate **worker** process (`pnpm start:worker`) — if a resume sits at `uploaded` forever, the worker isn't running, not a bug.\n- Storage is MinIO locally (`docker compose up -d minio`) — the same code talks to real AWS S3 or Cloudflare R2 in other environments.\n\nImport `TalentPilot-API.postman_environment.json` alongside this collection and select it as your active environment before running anything.",
+    "name": "TalentPilot API — Auth, Accounts, Profiles & Resumes (Sprints 1-3)",
+    "description": "## Response envelope\nEvery 2xx response is `{ success: true, data, meta }`. Every error is `{ success: false, error: { code, message, details?, fields? }, meta }` — `code` is one of the `ErrorCode` values in `common/exceptions/app.exception.ts` (e.g. `INVALID_CREDENTIALS`, `OTP_EXPIRED`, `TOKEN_SUPERSEDED`, `PLAN_LIMIT_REACHED`, `RESUME_IN_USE`). `meta` always carries `requestId` + `timestamp`; paginated list endpoints also put `nextCursor`/`hasMore` in `meta` (not top-level).\n\n## Auth model\n- **Access token**: short-lived JWT (`JWT_ACCESS_TTL`, default 15m). Sent as `Authorization: Bearer <token>` — the collection auto-fills this from the `accessToken` variable, which Register/Verify/Login/Refresh test scripts populate automatically.\n- **Refresh token**: opaque, rotating, lives in an httpOnly `tp_rt` cookie scoped to `/api/v1/auth`. Postman's cookie jar stores and resends it automatically like a browser — nothing to configure, just run requests in order within one Postman session.\n\n## Suggested run order (folders are already in this order top to bottom)\n1. **Register** → generates a fresh `{{email}}` each run\n2. **Verify Email** → fill `otpCode` from the email/logs first (see its description for the dev caveat)\n3. **Login** — alternative to step 2 if already verified; also works pre-verification\n4. **Refresh Token** → rotates the session\n5. **Get Me** / **Update Me**\n6. **Get Profile** / **Update Profile**\n7. **Upload Resume** (select a real PDF/DOCX in the `file` field) → captures `{{resumeId}}` → **List/Get/Rename/Download/Retry Resumes**\n7b. Once `status` reaches `parsed` (extraction + AI parsing both run automatically on the worker), **List Resume Sections** → **Update Resume Section** to view/edit the extracted fields → **Delete Resume** last\n8. **List Sessions** / **Revoke Session** — do this *before* Logout, or the session you just revoked (Logout) won't be there to list\n9. **Forgot Password** → fill `resetToken`, then **Reset Password**\n10. **Logout** / **Delete Me** — destructive/terminal, kept last on purpose\n\n## Resumes notes\n- Upload requires a **verified** email and a free plan slot (max 3 resumes/user) — both surface as 403.\n- Parsing is two automatic stages on the separate **worker** process (`pnpm start:worker`): text extraction (`uploaded` → `extracting` → `extracted`), then AI structuring (`extracted` → `parsing` → `parsed`). If a resume sits at `uploaded` or `extracted` forever, the worker isn't running, not a bug.\n- AI structuring calls OpenAI (`OPENAI_API_KEY` required) and is metered/budget-capped (`AI_USER_DAILY_BUDGET_USD` / `AI_GLOBAL_DAILY_BUDGET_USD`) — a resume stuck at `parsing` with a 429/`AI_BUDGET_EXCEEDED` in `parseError` means the budget or kill switch, not a bug either.\n- **Sections** (`personal_info`, `summary`, `skills`, `experience`, `projects`, `education`, `certifications`, `languages`) only exist once `status` is `parsed`. Editing a section via **Update Resume Section** marks it `editedByUser: true` so it survives a future re-parse.\n- Storage is MinIO locally (`docker compose up -d minio`) — the same code talks to real AWS S3 or Cloudflare R2 in other environments.\n\nImport `TalentPilot-API.postman_environment.json` alongside this collection and select it as your active environment before running anything.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -1844,6 +1844,219 @@
               ],
               "cookie": [],
               "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"RESUME_IN_USE\",\n    \"message\": \"This resume is used by 1 workspace(s). Delete those first.\",\n    \"details\": {\n      \"workspaces\": [\n        {\n          \"id\": \"ws-1\",\n          \"name\": \"My workspace\"\n        }\n      ]\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Resume Sections",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}/sections",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}",
+                "sections"
+              ]
+            },
+            "description": "Returns the AI-extracted sections for a resume (personal_info, summary, skills, experience, projects, education, certifications, languages), in display order. Empty until the AI parse job (queued automatically after text extraction) has completed — check the resume's `status` first; it must be `parsed`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/3836e6cc-e4fc-45c7-a8eb-eb1660da11ae/sections",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "3836e6cc-e4fc-45c7-a8eb-eb1660da11ae",
+                    "sections"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"sectionType\": \"personal_info\",\n      \"content\": {\n        \"fullName\": \"Alice Johnson\",\n        \"email\": \"alice.johnson@example.com\",\n        \"phone\": \"(555) 987-6543\",\n        \"location\": \"Seattle, WA\",\n        \"links\": []\n      },\n      \"orderIndex\": 0,\n      \"confidence\": 1,\n      \"aiGenerated\": true,\n      \"editedByUser\": false,\n      \"updatedAt\": \"2026-07-20T13:41:02.104Z\"\n    },\n    {\n      \"sectionType\": \"skills\",\n      \"content\": [\n        \"TypeScript\",\n        \"React\",\n        \"Node.js\"\n      ],\n      \"orderIndex\": 2,\n      \"confidence\": 1,\n      \"aiGenerated\": true,\n      \"editedByUser\": false,\n      \"updatedAt\": \"2026-07-20T13:41:02.104Z\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-20T13:41:05.221Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/00000000-0000-0000-0000-000000000000/sections",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "00000000-0000-0000-0000-000000000000",
+                    "sections"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"Not Found\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-20T13:41:05.221Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Resume Section",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}/sections/skills",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}",
+                "sections",
+                "skills"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": [\n    \"TypeScript\",\n    \"React\",\n    \"Node.js\",\n    \"PostgreSQL\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Overwrites one section's content. The URL segment is the section type: personal_info, summary, skills, experience, projects, education, certifications, or languages — each has its own content shape (object for personal_info/summary, array for the rest). Content is validated against that shape before saving; a mismatch returns 400 VALIDATION_FAILED. Marks the section as user-edited so a future re-parse will not overwrite it.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/3836e6cc-e4fc-45c7-a8eb-eb1660da11ae/sections/skills",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "3836e6cc-e4fc-45c7-a8eb-eb1660da11ae",
+                    "sections",
+                    "skills"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": [\n    \"TypeScript\",\n    \"React\",\n    \"Node.js\",\n    \"PostgreSQL\"\n  ]\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"sectionType\": \"skills\",\n    \"content\": [\n      \"TypeScript\",\n      \"React\",\n      \"Node.js\",\n      \"PostgreSQL\"\n    ],\n    \"orderIndex\": 2,\n    \"confidence\": 1,\n    \"aiGenerated\": true,\n    \"editedByUser\": true,\n    \"updatedAt\": \"2026-07-20T13:45:11.884Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-20T13:45:11.884Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Validation Failed",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/{{resumeId}}/sections/skills",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "{{resumeId}}",
+                    "sections",
+                    "skills"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": {\n    \"notAnArray\": true\n  }\n}"
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"Section content does not match the expected shape.\",\n    \"details\": {\n      \"issues\": [\n        {\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Expected array, received object\"\n        }\n      ]\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-20T13:45:11.884Z\"\n  }\n}"
             }
           ]
         }

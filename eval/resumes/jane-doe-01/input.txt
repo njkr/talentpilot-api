@@ -1,0 +1,28 @@
+Jane Doe
+jane.doe@example.com | (555) 123-4567 | Austin, TX
+LinkedIn: linkedin.com/in/janedoe
+
+Summary
+Backend engineer with 5 years of experience building distributed systems in Go and TypeScript.
+
+Skills
+Go, TypeScript, PostgreSQL, Kubernetes, AWS
+
+Experience
+Senior Backend Engineer — Acme Corp (Austin, TX)
+Jan 2022 - Present
+- Led migration of monolith to microservices, reducing p99 latency by 40%
+- Mentored 3 junior engineers
+
+Backend Engineer — Widgets Inc
+Jun 2019 - Dec 2021
+- Built payment processing pipeline handling 2M transactions/day
+
+Education
+B.S. Computer Science — University of Texas at Austin, 2019
+
+Certifications
+AWS Certified Solutions Architect — Amazon, 2021
+
+Languages
+English (native), Spanish (conversational)

@@ -43,6 +43,17 @@ export const envSchema = z.object({
   MAX_FILE_SIZE_MB: z.coerce.number().default(10),
   MAX_RESUME_PAGES: z.coerce.number().default(15),
   MIN_EXTRACTED_CHARS: z.coerce.number().default(200),
+
+  // AI gateway — every AI feature from Sprint 3 on calls AiService.complete(), which
+  // reads all of these. Get this section wrong and it's silent everywhere at once.
+  OPENAI_API_KEY: z.string().startsWith('sk-'),
+  OPENAI_TIMEOUT_MS: z.coerce.number().default(60_000),
+  OPENAI_MAX_RETRIES: z.coerce.number().default(3),
+  OPENAI_CONCURRENCY: z.coerce.number().default(5), // in-flight calls per process
+
+  AI_USER_DAILY_BUDGET_USD: z.coerce.number().default(2),
+  AI_GLOBAL_DAILY_BUDGET_USD: z.coerce.number().default(50),
+  AI_KILL_SWITCH: z.stringbool().default(false), // flip to stop ALL AI instantly
 });
 
 export type EnvType = z.infer<typeof envSchema>;

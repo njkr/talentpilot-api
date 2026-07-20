@@ -1,0 +1,12 @@
+{
+  "personalInfo": {
+    "fullName": "Carlos Diaz",
+    "email": "carlos.diaz@mail.com"
+  },
+  "skillsInclude": ["JavaScript", "React", "CSS", "HTML", "Git"],
+  "minExperienceEntries": 1,
+  "minEducationEntries": 1,
+  "maxCertificationEntries": 0,
+  "maxLanguageEntries": 0,
+  "firstJobIsCurrent": true
+}

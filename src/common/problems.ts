@@ -130,4 +130,45 @@ export const Problems = {
       `Your plan allows ${limit} ${feature}. Upgrade to add more.`,
       { feature, limit, current },
     ),
+
+  // ── Sprint 3: AI gateway ──────────────────────────────────────────────────
+  promptNotFound: (key: string) =>
+    new AppException(
+      ErrorCode.NOT_FOUND,
+      `No active prompt template for "${key}".`,
+      { key },
+    ),
+
+  aiProviderUnavailable: () =>
+    new AppException(
+      ErrorCode.AI_PROVIDER_UNAVAILABLE,
+      'The AI provider is temporarily unavailable. Please try again shortly.',
+    ),
+
+  aiBudgetExceeded: (scope: 'user' | 'global') =>
+    new AppException(
+      ErrorCode.AI_BUDGET_EXCEEDED,
+      scope === 'user'
+        ? 'You have reached your daily AI usage limit. Try again tomorrow.'
+        : 'The service has reached its daily AI usage limit. Try again tomorrow.',
+      { scope },
+    ),
+
+  aiOutputInvalid: () =>
+    new AppException(
+      ErrorCode.AI_OUTPUT_INVALID,
+      'The AI produced an invalid result and could not complete this request.',
+    ),
+
+  aiContextTooLong: () =>
+    new AppException(
+      ErrorCode.AI_CONTEXT_TOO_LONG,
+      'This resume is too long to process.',
+    ),
+
+  aiContentFiltered: () =>
+    new AppException(
+      ErrorCode.AI_CONTENT_FILTERED,
+      'This content was flagged by the AI provider and could not be processed.',
+    ),
 };
