@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "cd40433b-b434-486e-b73e-1e8a8b97422e",
-    "name": "TalentPilot API — Auth, Accounts, Profiles, Resumes & Pipeline (Sprints 1-6)",
-    "description": "## Response envelope\nEvery 2xx response is `{ success: true, data, meta }`. Every error is `{ success: false, error: { code, message, details?, fields? }, meta }` — `code` is one of the `ErrorCode` values in `common/exceptions/app.exception.ts` (e.g. `INVALID_CREDENTIALS`, `OTP_EXPIRED`, `TOKEN_SUPERSEDED`, `PLAN_LIMIT_REACHED`, `RESUME_IN_USE`, `INSUFFICIENT_CREDITS`). `meta` always carries `requestId` + `timestamp`; paginated list endpoints also put `nextCursor`/`hasMore` in `meta` (not top-level).\n\n## Auth model\n- **Access token**: short-lived JWT (`JWT_ACCESS_TTL`, default 15m). Sent as `Authorization: Bearer <token>` — the collection auto-fills this from the `accessToken` variable, which Register/Verify/Login/Refresh test scripts populate automatically.\n- **Refresh token**: opaque, rotating, lives in an httpOnly `tp_rt` cookie scoped to `/api/v1/auth`. Postman's cookie jar stores and resends it automatically like a browser — nothing to configure, just run requests in order within one Postman session.\n\n## Suggested run order (folders are already in this order top to bottom)\n1. **Register** → generates a fresh `{{email}}` each run, and grants `SIGNUP_CREDIT_GRANT` (100 by default) credits automatically\n2. **Verify Email** → fill `otpCode` from the email/logs first (see its description for the dev caveat)\n3. **Login** — alternative to step 2 if already verified; also works pre-verification\n4. **Refresh Token** → rotates the session\n5. **Get Me** / **Update Me**\n6. **Get Profile** / **Update Profile**\n7. **Upload Resume** (select a real PDF/DOCX in the `file` field) → captures `{{resumeId}}` → **List/Get/Rename/Download/Retry Resumes**\n7b. Once `status` reaches `parsed` (extraction + AI parsing both run automatically on the worker), **List Resume Sections** → **Update Resume Section** to view/edit the extracted fields\n8. **Paste Job Description** (or **Upload Job Description**) → captures `{{jdId}}`, analysed inline → **Score Resume Against Job Description** to match it against the resume from step 7 → **Delete Resume** / **Delete Job Description** last\n9. **Workspaces & Pipeline**: **Create Workspace** (pairs `{{resumeId}}` + `{{jdId}}`) → **Start Analysis** → **Mint Stream Ticket** + **Live Progress (SSE)** (or just poll **Get Run Status** until `status` is `completed`/`partial`) → **Get ATS Report** for the actual score → **Retry Run** if it failed/partial → **Delete Workspace** last\n10. **List Sessions** / **Revoke Session** — do this *before* Logout, or the session you just revoked (Logout) won't be there to list\n11. **Forgot Password** → fill `resetToken`, then **Reset Password**\n12. **Logout** / **Delete Me** — destructive/terminal, kept last on purpose\n\n## Resumes notes\n- Upload requires a **verified** email and a free plan slot (max 3 resumes/user) — both surface as 403.\n- Parsing is two automatic stages on the separate **worker** process (`pnpm start:worker`): text extraction (`uploaded` → `extracting` → `extracted`), then AI structuring (`extracted` → `parsing` → `parsed`). If a resume sits at `uploaded` or `extracted` forever, the worker isn't running, not a bug.\n- AI structuring calls OpenAI (`OPENAI_API_KEY` required) and is metered/budget-capped (`AI_USER_DAILY_BUDGET_USD` / `AI_GLOBAL_DAILY_BUDGET_USD`) — a resume stuck at `parsing` with a 429/`AI_BUDGET_EXCEEDED` in `parseError` means the budget or kill switch, not a bug either.\n- **Sections** (`personal_info`, `summary`, `skills`, `experience`, `projects`, `education`, `certifications`, `languages`) only exist once `status` is `parsed`. Editing a section via **Update Resume Section** marks it `editedByUser: true` so it survives a future re-parse.\n\n## Job descriptions & matching notes\n- Job descriptions are analysed **inline** (not queued) — the paste/upload response already carries `status: analyzed` with parsed requirements and skills, typically within a few seconds.\n- Pasting/uploading text that normalizes to the same content hash for the same user returns the existing analysed row instead of paying for a second AI call.\n- **Score Resume Against Job Description** requires the resume to be `parsed` and the JD to be `analyzed` first — otherwise it 409s with `RESUME_NOT_PARSED` or `JD_NOT_ANALYZED`.\n- Re-running a match after editing neither side is free: embeddings are content-hashed per chunk, so unchanged chunks are reused (`stats.resume.reused` / `stats.jd.reused`) instead of re-embedded.\n- Storage is MinIO locally (`docker compose up -d minio`) — the same code talks to real AWS S3 or Cloudflare R2 in other environments.\n\n## Workspaces & pipeline notes (Sprints 5-6)\n- A **workspace** pairs one resume with one job description. **Start Analysis** runs both through a 5-step pipeline on the **worker** process — `parse_resume → parse_jd → generate_embeddings → match_keywords → score_ats` — each step idempotent, so a crashed/retried run never redoes (or recharges for) completed work.\n- Costs a flat **10 credits**, debited atomically with creating the run; requires a unique `Idempotency-Key` header (use Postman's `{{$guid}}` dynamic variable) so a retried request replays the existing run instead of double-charging.\n- Only one active (`queued`/`running`) run per workspace — enforced by a database partial unique index, not just application logic, so it holds even under concurrent requests. A second **Start Analysis** call while one is active 409s `ANALYSIS_ALREADY_RUNNING`.\n- Progress is pushed live via SSE (**Mint Stream Ticket** then **Live Progress (SSE)**), or pollable via **Get Run Status** — both share the same state shape. A run that partially fails (`status: partial`) proportionally refunds credits for the steps that didn't complete; **Retry Run** re-runs only the failed/blocked steps for free.\n- The worker process (`pnpm start:worker`) must be running for any of this to progress past `queued` — same caveat as resume/JD parsing above.\n\nImport `TalentPilot-API.postman_environment.json` alongside this collection and select it as your active environment before running anything.",
+    "name": "TalentPilot API — Auth, Accounts, Profiles, Resumes & Pipeline (Sprints 1-8)",
+    "description": "## Response envelope\nEvery 2xx response is `{ success: true, data, meta }`. Every error is `{ success: false, error: { code, message, details?, fields? }, meta }` — `code` is one of the `ErrorCode` values in `common/exceptions/app.exception.ts` (e.g. `INVALID_CREDENTIALS`, `OTP_EXPIRED`, `TOKEN_SUPERSEDED`, `PLAN_LIMIT_REACHED`, `RESUME_IN_USE`, `INSUFFICIENT_CREDITS`). `meta` always carries `requestId` + `timestamp`; paginated list endpoints also put `nextCursor`/`hasMore` in `meta` (not top-level).\n\n## Auth model\n- **Access token**: short-lived JWT (`JWT_ACCESS_TTL`, default 15m). Sent as `Authorization: Bearer <token>` — the collection auto-fills this from the `accessToken` variable, which Register/Verify/Login/Refresh test scripts populate automatically.\n- **Refresh token**: opaque, rotating, lives in an httpOnly `tp_rt` cookie scoped to `/api/v1/auth`. Postman's cookie jar stores and resends it automatically like a browser — nothing to configure, just run requests in order within one Postman session.\n\n## Suggested run order (folders are already in this order top to bottom)\n1. **Register** → generates a fresh `{{email}}` each run, and grants `SIGNUP_CREDIT_GRANT` (100 by default) credits automatically\n2. **Verify Email** → fill `otpCode` from the email/logs first (see its description for the dev caveat)\n3. **Login** — alternative to step 2 if already verified; also works pre-verification\n4. **Refresh Token** → rotates the session\n5. **Get Me** / **Update Me**\n6. **Get Profile** / **Update Profile**\n7. **Upload Resume** (select a real PDF/DOCX in the `file` field) → captures `{{resumeId}}` → **List/Get/Rename/Download/Retry Resumes**\n7b. Once `status` reaches `parsed` (extraction + AI parsing both run automatically on the worker), **List Resume Sections** → **Update Resume Section** to view/edit the extracted fields\n8. **Paste Job Description** (or **Upload Job Description**) → captures `{{jdId}}`, analysed inline → **Score Resume Against Job Description** to match it against the resume from step 7 → **Delete Resume** / **Delete Job Description** last\n9. **Workspaces & Pipeline**: **Create Workspace** (pairs `{{resumeId}}` + `{{jdId}}`) → **Start Analysis** → **Mint Stream Ticket** + **Live Progress (SSE)** (or just poll **Get Run Status** until `status` is `completed`/`partial`) → **Get ATS Report** for the actual score → **Retry Run** if it failed/partial → **Delete Workspace** last\n10. Once the run is `completed`/`partial`, everything below reads from the SAME `{{workspaceId}}`/`{{resumeId}}` — no new setup needed: **Suggestions & Resume Versions** (list → apply/reject → diff/restore) → **Cover Letter** (get current, or regenerate for 2 credits) → **Interview Prep** (list questions → submit a practice answer for 1 credit) → **Company, Salary & Learning Roadmap** (all three are read-only GETs)\n11. **List Sessions** / **Revoke Session** — do this *before* Logout, or the session you just revoked (Logout) won't be there to list\n12. **Forgot Password** → fill `resetToken`, then **Reset Password**\n13. **Logout** / **Delete Me** — destructive/terminal, kept last on purpose\n\n## Resumes notes\n- Upload requires a **verified** email and a free plan slot (max 3 resumes/user) — both surface as 403.\n- Parsing is two automatic stages on the separate **worker** process (`pnpm start:worker`): text extraction (`uploaded` → `extracting` → `extracted`), then AI structuring (`extracted` → `parsing` → `parsed`). If a resume sits at `uploaded` or `extracted` forever, the worker isn't running, not a bug.\n- AI structuring calls OpenAI (`OPENAI_API_KEY` required) and is metered/budget-capped (`AI_USER_DAILY_BUDGET_USD` / `AI_GLOBAL_DAILY_BUDGET_USD`) — a resume stuck at `parsing` with a 429/`AI_BUDGET_EXCEEDED` in `parseError` means the budget or kill switch, not a bug either.\n- **Sections** (`personal_info`, `summary`, `skills`, `experience`, `projects`, `education`, `certifications`, `languages`) only exist once `status` is `parsed`. Editing a section via **Update Resume Section** marks it `editedByUser: true` so it survives a future re-parse.\n\n## Job descriptions & matching notes\n- Job descriptions are analysed **inline** (not queued) — the paste/upload response already carries `status: analyzed` with parsed requirements and skills, typically within a few seconds.\n- Pasting/uploading text that normalizes to the same content hash for the same user returns the existing analysed row instead of paying for a second AI call.\n- **Score Resume Against Job Description** requires the resume to be `parsed` and the JD to be `analyzed` first — otherwise it 409s with `RESUME_NOT_PARSED` or `JD_NOT_ANALYZED`.\n- Re-running a match after editing neither side is free: embeddings are content-hashed per chunk, so unchanged chunks are reused (`stats.resume.reused` / `stats.jd.reused`) instead of re-embedded.\n- Storage is MinIO locally (`docker compose up -d minio`) — the same code talks to real AWS S3 or Cloudflare R2 in other environments.\n\n## Workspaces & pipeline notes (Sprints 5-8)\n- A **workspace** pairs one resume with one job description. **Start Analysis** runs both through a 12-step DAG on the **worker** process:\n  ```\n  parse_resume ─┬─► generate_embeddings ─► match_keywords ─► score_ats ─┬─► optimize_resume ─► generate_cover_letter ─┐\n                │                                                       └─► build_learning_path ───────────────────┤\n  parse_jd ─────┼─► research_company     (optional)                                                                 ├─► finalize\n                ├─► estimate_salary      (optional)                                                                 │\n                └─► generate_interview_qs ───────────────────────────────────────────────────────────────────────────┘\n  ```\n  `research_company`/`estimate_salary`/`generate_interview_qs` don't need the ATS score, so they run CONCURRENTLY with the whole scoring branch — a full run finishes in roughly 45-90s, not the ~3min it would take serialised. Every step is idempotent, so a crashed/retried run never redoes (or recharges for) completed work.\n- Costs a flat **21 credits** (was 10 pre-Sprint-7), debited atomically with creating the run; requires a unique `Idempotency-Key` header (use Postman's `{{$guid}}` dynamic variable) so a retried request replays the existing run instead of double-charging.\n- Only one active (`queued`/`running`) run per workspace — enforced by a database partial unique index, not just application logic, so it holds even under concurrent requests. A second **Start Analysis** call while one is active 409s `ANALYSIS_ALREADY_RUNNING`.\n- `research_company` and `estimate_salary` are optional (`required: false`) — a dead Tavily key or a JD with no company name leaves the run `partial` with everything else intact, never `failed`. A failed optional step no longer blocks `finalize` (which depends on every step, optional ones included) from still running.\n- Progress is pushed live via SSE (**Mint Stream Ticket** then **Live Progress (SSE)**), or pollable via **Get Run Status** — both share the same state shape. A run that partially fails (`status: partial`) proportionally refunds credits for the steps that didn't complete; **Retry Run** re-runs only the failed/blocked steps for free.\n- The worker process (`pnpm start:worker`) must be running for any of this to progress past `queued` — same caveat as resume/JD parsing above.\n\n## Optimisation, cover letter & career-prep notes (Sprints 7-8)\n- **Suggestions** (from `optimize_resume`) go through a fabrication guard in code, not just prompt rules — invented metrics, years, employers/schools, and credentials are silently dropped before they ever reach **List Suggestions**. What you see has already passed verification.\n- **Apply Suggestions** batches every accepted suggestion into ONE new resume version (not one version per suggestion) and is free — already paid for by the run that generated them. If you hand-edit a bullet via the Sections API *after* a suggestion for it was generated, applying that suggestion is refused (`skipped`, marked `stale`) rather than silently overwriting your edit.\n- Resume history is append-only: **Restore Resume Version** copies an old version FORWARD as a new one — it never rewrites or deletes anything, so you can always get back to where you were. **Diff Resume Versions** is word-level, not character-level, so a one-word change doesn't read as unreadable noise.\n- **Cover Letter** is generated automatically by the run; **Regenerate Cover Letter** is a separate on-demand action (different tone/length) that costs 2 credits — but only on success: your balance is checked before the AI is even called, and the debit itself only happens after a clean result (no `[Company Name]`-style placeholders), so a rejected generation is never charged.\n- **Interview Prep** questions are grounded in this candidate's actual resume and this JD's actual requirements — `basedOn` names what prompted each one. **Submit Practice Answer** follows the same charge-only-on-success rule as cover letter regeneration: 1 credit, checked and debited around the AI call, never charged for a failure.\n- **Company Insight** is cached globally for 7 days per (normalised) company name — the 50th person who applies to the same company this week gets a free, already-computed answer (`fromCache: true`). `confidence: \"low\"` is an honest signal the company has little public information, not an error.\n- **Salary Estimate** is always a range (`p25`/`p50`/`p75`) with `isEstimate: true` baked into the entity itself — there is no code path that returns a bare number.\n- **Learning Roadmap** is capped at 6 items (enforced by the prompt AND in code) — a longer list reads as a guilt trip, not a plan.\n\nImport `TalentPilot-API.postman_environment.json` alongside this collection and select it as your active environment before running anything.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -3430,6 +3430,1180 @@
       ]
     },
     {
+      "name": "Suggestions & Resume Versions",
+      "item": [
+        {
+          "name": "List Suggestions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions?status=pending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "suggestions"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "pending",
+                  "description": "pending | accepted | rejected | stale"
+                }
+              ]
+            },
+            "description": "AI-generated resume-optimisation suggestions from the `optimize_resume` pipeline step. Every suggestion has already passed the fabrication guard — invented metrics, years, organisations, and credentials are dropped silently before they ever reach this list.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.data.length) {",
+                  "    pm.environment.set('suggestionId', json.data[0].id); pm.collectionVariables.set('suggestionId', json.data[0].id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions?status=pending",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "suggestions"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "pending"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"{{suggestionId}}\",\n      \"sectionType\": \"experience\",\n      \"itemIndex\": 0,\n      \"bulletIndex\": 1,\n      \"oldText\": \"Improved API performance\",\n      \"newText\": \"Improved API performance to support Node.js and TypeScript backend services\",\n      \"reason\": \"Surfaces the Node.js/TypeScript requirement using terminology already demonstrated in this bullet's surrounding experience\",\n      \"impact\": \"high\",\n      \"keywordsAdded\": [\n        \"Node.js\",\n        \"TypeScript\"\n      ],\n      \"status\": \"pending\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Apply Suggestions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"suggestionIds\": [\"{{suggestionId}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions/apply",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "suggestions",
+                "apply"
+              ]
+            },
+            "description": "Accepts a batch of suggestions as ONE new resume version — not one version per suggestion, which would make the history unreadable. A suggestion is refused (marked `stale`, returned in `skipped`) if the underlying bullet was hand-edited since the suggestion was generated; the user's edit always wins and is never silently overwritten. Free — no credits charged (already paid for by the analysis run that generated them).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"suggestionIds\": [\"c3d4e5f6-1a2b-4c3d-9e8f-7a6b5c4d3e2f\"]\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions/apply",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "suggestions",
+                    "apply"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"version\": 2,\n    \"applied\": 1,\n    \"skipped\": []\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "201 Created — one suggestion refused as stale",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"suggestionIds\": [\"c3d4e5f6-1a2b-4c3d-9e8f-7a6b5c4d3e2f\", \"a1b2c3d4-5e6f-4a3b-8c9d-0e1f2a3b4c5d\"]\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions/apply",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "suggestions",
+                    "apply"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"version\": 2,\n    \"applied\": 1,\n    \"skipped\": [\n      \"a1b2c3d4-5e6f-4a3b-8c9d-0e1f2a3b4c5d\"\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Reject Suggestions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"suggestionIds\": [\"{{suggestionId}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "suggestions",
+                "reject"
+              ]
+            },
+            "description": "Dismisses a batch of suggestions without applying them — no new resume version is created.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"suggestionIds\": [\"c3d4e5f6-1a2b-4c3d-9e8f-7a6b5c4d3e2f\"]\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "suggestions",
+                    "reject"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"rejected\": 1\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Resume Versions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}/versions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}",
+                "versions"
+              ]
+            },
+            "description": "Newest first. v1 is always the original upload — applying suggestions or restoring an older version always creates a NEW version forward, so history is never rewritten.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/{{resumeId}}/versions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "{{resumeId}}",
+                    "versions"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"d4e5f6a7-2b3c-4d4e-9f8a-6b5c4d3e2f1a\",\n      \"version\": 2,\n      \"label\": \"Optimised for Acme Corp — Senior Backend Engineer\",\n      \"changeSummary\": \"Applied 1 improvement\",\n      \"createdBy\": \"ai\",\n      \"suggestionsApplied\": 1,\n      \"createdAt\": \"2026-07-21T09:12:40.918Z\"\n    },\n    {\n      \"id\": \"e5f6a7b8-3c4d-4e5f-8a9b-5c4d3e2f1a0b\",\n      \"version\": 1,\n      \"label\": \"\",\n      \"changeSummary\": \"\",\n      \"createdBy\": \"user\",\n      \"suggestionsApplied\": 0,\n      \"createdAt\": \"2026-07-20T12:24:44.947Z\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Diff Resume Versions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}/versions/diff?from=1&to=2",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}",
+                "versions",
+                "diff"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "1"
+                },
+                {
+                  "key": "to",
+                  "value": "2"
+                }
+              ]
+            },
+            "description": "Word-level diff per section (not character-level, which turns a one-word change into unreadable noise). Only sections that actually changed are returned.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/{{resumeId}}/versions/diff?from=1&to=2",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "{{resumeId}}",
+                    "versions",
+                    "diff"
+                  ],
+                  "query": [
+                    {
+                      "key": "from",
+                      "value": "1"
+                    },
+                    {
+                      "key": "to",
+                      "value": "2"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"sectionType\": \"experience\",\n      \"changed\": true,\n      \"changes\": [\n        { \"value\": \"Senior Engineer at Acme (2020) \\u2013 present\\n- \" },\n        { \"removed\": true, \"value\": \"Improved\" },\n        { \"added\": true, \"value\": \"Significantly improved\" },\n        { \"value\": \" API performance\" }\n      ]\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Restore Resume Version",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}/versions/1/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}",
+                "versions",
+                "1",
+                "restore"
+              ]
+            },
+            "description": "Copies the target version FORWARD as a new version — restoring v1 when you're on v3 creates v4, it does not delete v2/v3. History is never rewritten, so you can always come back.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/{{resumeId}}/versions/1/restore",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "{{resumeId}}",
+                    "versions",
+                    "1",
+                    "restore"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"version\": 3\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — that version does not exist",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/{{resumeId}}/versions/99/restore",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "{{resumeId}}",
+                    "versions",
+                    "99",
+                    "restore"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"Version 99 not found\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cover Letter",
+      "item": [
+        {
+          "name": "Get Current Cover Letter",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/cover-letter",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "cover-letter"
+              ]
+            },
+            "description": "The cover letter produced by the pipeline's `generate_cover_letter` step (or the most recent **Regenerate**, whichever is newer).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/cover-letter",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "cover-letter"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"f6a7b8c9-4d5e-4f6a-9b8c-6d5e4f3a2b1c\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"version\": 1,\n    \"tone\": \"professional\",\n    \"length\": \"standard\",\n    \"content\": \"Acme Corp's position for a Senior Backend Engineer aligns closely with my experience in Node.js and TypeScript...\",\n    \"wordCount\": 266,\n    \"createdAt\": \"2026-07-21T09:12:55.201Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:55.201Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — none generated yet",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/cover-letter",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "cover-letter"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"Not Found\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:55.201Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Regenerate Cover Letter",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tone\": \"enthusiastic\",\n  \"length\": \"short\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/cover-letter/regenerate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "cover-letter",
+                "regenerate"
+              ]
+            },
+            "description": "Regenerates with a different tone (`professional` | `friendly` | `confident` | `enthusiastic`) and/or length (`short` | `standard` | `long`), both optional. Costs 2 credits and supersedes the previous version as current — the old one stays in the history for reference. Balance is checked, and the AI called, BEFORE any credit is debited: a generation that fails (e.g. the placeholder guard rejects a `[Company Name]`-style output) is never charged.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tone\": \"enthusiastic\",\n  \"length\": \"short\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/cover-letter/regenerate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "cover-letter",
+                    "regenerate"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"2ffab0e3-7bae-4606-b38b-2c90ee9b190a\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"version\": 2,\n    \"tone\": \"enthusiastic\",\n    \"length\": \"short\",\n    \"content\": \"Joining Acme Corp as a Senior Backend Engineer presents an exciting opportunity...\",\n    \"wordCount\": 170,\n    \"createdAt\": \"2026-07-21T13:34:04.389Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T13:34:04.394Z\"\n  }\n}"
+            },
+            {
+              "name": "402 Payment Required — insufficient credits",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tone\": \"enthusiastic\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/cover-letter/regenerate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "cover-letter",
+                    "regenerate"
+                  ]
+                }
+              },
+              "status": "Payment Required",
+              "code": 402,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"INSUFFICIENT_CREDITS\",\n    \"message\": \"This analysis needs 2 credits; you have 0.\",\n    \"details\": {\n      \"required\": 2,\n      \"balance\": 0\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T13:34:04.394Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Interview Prep",
+      "item": [
+        {
+          "name": "List Interview Questions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/interview-questions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "interview-questions"
+              ]
+            },
+            "description": "Generated by `generate_interview_qs`, which runs in parallel with the ATS scoring branch (it only needs the parsed resume + JD, not the score). Mixed by type (`hr` | `behavioral` | `technical` | `coding` | `system_design`) and difficulty, grounded in this candidate's actual experience — `basedOn` names the resume item or JD requirement that prompted each question.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.data.length) {",
+                  "    pm.environment.set('questionId', json.data[0].id); pm.collectionVariables.set('questionId', json.data[0].id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/interview-questions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "interview-questions"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"{{questionId}}\",\n      \"type\": \"behavioral\",\n      \"difficulty\": \"medium\",\n      \"question\": \"You led the Warehouse Management System migration at Brands for Less \\u2014 walk me through how you sequenced it.\",\n      \"idealAnswer\": \"Situation: the existing system couldn't handle real-time inventory... Task: ... Action: ... Result: ...\",\n      \"framework\": \"STAR\",\n      \"whyAsked\": \"Tests real-world leadership and technical sequencing on a project already on the resume\",\n      \"basedOn\": \"Experience: Warehouse Management System at Brands for Less\",\n      \"userAnswer\": null,\n      \"aiFeedback\": null,\n      \"answerScore\": null\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Submit Practice Answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answer\": \"I led a team migration from a monolith to microservices, coordinating with 5 engineers over 3 months, prioritizing zero-downtime deployment.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/interview-questions/{{questionId}}/answer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "interview-questions",
+                "{{questionId}}",
+                "answer"
+              ]
+            },
+            "description": "Practice mode: costs 1 credit per attempt, only charged if the AI feedback call actually succeeds (checked against your balance first, so a request you can't afford never spends real OpenAI money).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"answer\": \"I led a team migration from a monolith to microservices...\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/interview-questions/{{questionId}}/answer",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "interview-questions",
+                    "{{questionId}}",
+                    "answer"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{questionId}}\",\n    \"type\": \"behavioral\",\n    \"difficulty\": \"medium\",\n    \"question\": \"You led the Warehouse Management System migration at Brands for Less \\u2014 walk me through how you sequenced it.\",\n    \"idealAnswer\": \"Situation: the existing system couldn't handle real-time inventory... Task: ... Action: ... Result: ...\",\n    \"framework\": \"STAR\",\n    \"whyAsked\": \"Tests real-world leadership and technical sequencing on a project already on the resume\",\n    \"basedOn\": \"Experience: Warehouse Management System at Brands for Less\",\n    \"userAnswer\": \"I led a team migration from a monolith to microservices, coordinating with 5 engineers over 3 months, prioritizing zero-downtime deployment.\",\n    \"aiFeedback\": \"Your answer provides a clear example of a leadership situation, but it lacks detail in several areas. Elaborate on the specific challenges faced, your coordination strategy, and the measured outcome.\",\n    \"answerScore\": 60\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "402 Payment Required — insufficient credits",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"answer\": \"...\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/interview-questions/{{questionId}}/answer",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "interview-questions",
+                    "{{questionId}}",
+                    "answer"
+                  ]
+                }
+              },
+              "status": "Payment Required",
+              "code": 402,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"INSUFFICIENT_CREDITS\",\n    \"message\": \"This analysis needs 1 credits; you have 0.\",\n    \"details\": {\n      \"required\": 1,\n      \"balance\": 0\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Company, Salary & Learning Roadmap",
+      "item": [
+        {
+          "name": "Get Company Insight",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/company-insight",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "company-insight"
+              ]
+            },
+            "description": "Tavily-grounded company research from `research_company` (optional step — Tavily/no-company-name failures leave this 404 rather than failing the whole run). Globally cached for 7 days per company (by normalised name), so the 50th person researching the same company pays nothing and gets the same answer — `fromCache: true` on a hit. `confidence: \"low\"` with a thin `overview` means the company genuinely has little public information, not a bug; every claim is traceable via `sources`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/company-insight",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "company-insight"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"a7b8c9d0-5e6f-4a7b-9c8d-6e5f4a3b2c1d\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"runId\": \"d3a1d347-d0b7-46ff-b745-98ce747f419c\",\n    \"companyName\": \"Acme Corp\",\n    \"overview\": \"Acme Corp appears to be a company with a mixed reputation based on employee reviews. While some employees report a positive experience, others describe a challenging work environment.\",\n    \"culture\": [\n      \"Mixed employee reviews on work-life balance\",\n      \"Reports of both strong and weak team collaboration depending on team\"\n    ],\n    \"talkingPoints\": [\n      \"Ask about team-level culture directly, since reviews vary significantly by team\"\n    ],\n    \"sources\": [\n      \"https://example.com/glassdoor-review\",\n      \"https://example.com/news-article\"\n    ],\n    \"confidence\": \"low\",\n    \"fromCache\": false,\n    \"createdAt\": \"2026-07-21T09:12:20.001Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:20.010Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — research didn't run or is still pending",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/company-insight",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "company-insight"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"Not Found\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:20.010Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Salary Estimate",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/salary-estimate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "salary-estimate"
+              ]
+            },
+            "description": "From `estimate_salary` (optional step). Always a range (`p25`/`p50`/`p75`) with `isEstimate: true` — the API never returns a single figure or presents this as a quote. `methodology` states what it's actually based on.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/salary-estimate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "salary-estimate"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"b8c9d0e1-6f7a-4b8c-9d0e-7f6a5b4c3d2e\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"runId\": \"d3a1d347-d0b7-46ff-b745-98ce747f419c\",\n    \"currency\": \"USD\",\n    \"p25\": 156420,\n    \"p50\": 204437,\n    \"p75\": 270925,\n    \"isEstimate\": true,\n    \"methodology\": \"Based on a combination of average salary data from Glassdoor and Salary.com for Senior Backend Engineers across various U.S. locations.\",\n    \"factors\": [\n      \"Adjusted upward for senior-level scope\",\n      \"Wide range reflects unspecified location cost-of-living\"\n    ],\n    \"negotiationTips\": [\n      \"Your 7 years of experience exceeds the stated 5-year requirement \\u2014 anchor discussions above the midpoint\"\n    ],\n    \"createdAt\": \"2026-07-21T09:12:25.331Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:25.340Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Learning Roadmap",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/learning-roadmap",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "learning-roadmap"
+              ]
+            },
+            "description": "From `build_learning_path`. At most 6 items (enforced both by the prompt and in code) with realistic hour estimates, required gaps ordered before preferred ones — a 20-item roadmap reads as homework, not a plan.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/learning-roadmap",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "learning-roadmap"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"c9d0e1f2-7a8b-4c9d-8e1f-6a5b4c3d2e1f\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"runId\": \"d3a1d347-d0b7-46ff-b745-98ce747f419c\",\n    \"items\": [\n      {\n        \"title\": \"Node.js Documentation\",\n        \"gapReason\": \"The job requires strong Node.js backend experience beyond what your resume demonstrates\",\n        \"resourceType\": \"documentation\",\n        \"url\": \"https://nodejs.org/en/docs\",\n        \"estHours\": 20,\n        \"priority\": \"required\"\n      },\n      {\n        \"title\": \"Kubernetes Basics by Google Cloud\",\n        \"gapReason\": \"The role mentions Kubernetes-based deployments, which is a preferred (not required) skill\",\n        \"resourceType\": \"course\",\n        \"url\": null,\n        \"estHours\": 15,\n        \"priority\": \"preferred\"\n      }\n    ],\n    \"createdAt\": \"2026-07-21T09:12:30.552Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:30.560Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Auth / Sessions",
       "item": [
         {
@@ -4001,6 +5175,16 @@
     },
     {
       "key": "streamTicket",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "suggestionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "questionId",
       "value": "",
       "type": "string"
     }

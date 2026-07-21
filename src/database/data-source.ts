@@ -17,6 +17,14 @@ import { PipelineRun } from '../pipeline/entities/pipeline-run.entity';
 import { PipelineStep } from '../pipeline/entities/pipeline-step.entity';
 import { AtsReport } from '../ats/entities/ats-report.entity';
 import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
+import { AiSuggestion } from '../suggestions/entities/ai-suggestion.entity';
+import { ResumeVersion } from '../resume-versions/entities/resume-version.entity';
+import { CoverLetter } from '../cover-letter/entities/cover-letter.entity';
+import { InterviewQuestion } from '../interview/entities/interview-question.entity';
+import { LearningRoadmap } from '../learning-roadmap/entities/learning-roadmap.entity';
+import { CompanyResearchCache } from '../company/entities/company-research-cache.entity';
+import { CompanyInsight } from '../company/entities/company-insight.entity';
+import { SalaryEstimate } from '../salary/entities/salary-estimate.entity';
 
 // Single source of truth for the DB connection, shared by:
 //  - the Nest app (via TypeOrmModule.forRootAsync in app.module.ts)
@@ -45,6 +53,14 @@ export const dataSourceOptions: DataSourceOptions = {
     PipelineStep,
     AtsReport,
     AtsKeywordMatch,
+    AiSuggestion,
+    ResumeVersion,
+    CoverLetter,
+    InterviewQuestion,
+    LearningRoadmap,
+    CompanyResearchCache,
+    CompanyInsight,
+    SalaryEstimate,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   synchronize: false, // migrations only — see Sprint 1 §2

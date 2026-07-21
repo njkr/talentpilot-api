@@ -6,7 +6,13 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
-export type CreditReason = 'signup_bonus' | 'analyze' | 'refund' | 'grant';
+export type CreditReason =
+  | 'signup_bonus'
+  | 'analyze'
+  | 'refund'
+  | 'grant'
+  | 'cover_letter_regenerate'
+  | 'answer_feedback';
 
 /**
  * An append-only ledger, not a mutable balance column. Balance is always

@@ -16,7 +16,8 @@ import { decodeCursor, encodeCursor } from '../common/utils/cursor.util';
 import { AtsReport } from '../ats/entities/ats-report.entity';
 import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
 
-const ANALYZE_CREDIT_COST = 10;
+// Sum of every step's creditWeight in STEP_MANIFEST (Sprints 5-8) — keep in sync.
+const ANALYZE_CREDIT_COST = 21;
 const ONE_ACTIVE_RUN_CONSTRAINT = 'one_active_run_per_workspace';
 
 @Injectable()

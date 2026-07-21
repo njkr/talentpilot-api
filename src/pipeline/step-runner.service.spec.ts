@@ -57,13 +57,13 @@ function fakeRunRepo(initial: Record<string, unknown>) {
 }
 
 function build(steps: any[]) {
-  const registry = new StepRegistry(
-    steps.find((s) => s.name === 'parse_resume'),
-    steps.find((s) => s.name === 'parse_jd'),
-    steps.find((s) => s.name === 'generate_embeddings'),
-    steps.find((s) => s.name === 'match_keywords'),
-    steps.find((s) => s.name === 'score_ats'),
+  // StepRegistry's constructor takes one positional arg per real step class (12,
+  // Sprints 5-8) — order matches STEP_MANIFEST's key order, which is also the order
+  // StepRegistry itself constructs `this.steps` in.
+  const ordered = (Object.keys(STEP_MANIFEST) as string[]).map((name) =>
+    steps.find((s) => s.name === name),
   );
+  const registry = new (StepRegistry as any)(...ordered);
 
   const runRepo = fakeRunRepo({
     workspaceId: 'ws-1',
@@ -75,6 +75,13 @@ function build(steps: any[]) {
   });
   const stepRepo = fakeStepRepo();
   const workspaces = { update: jest.fn().mockResolvedValue(undefined) };
+  const tokenUsage = {
+    createQueryBuilder: jest.fn(() => ({
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ c: '0.000000' }),
+    })),
+  };
   const bus = { publish: jest.fn() };
   const credits = { refund: jest.fn().mockResolvedValue(undefined) };
   const hydrator = {
@@ -94,6 +101,7 @@ function build(steps: any[]) {
     runRepo as any,
     stepRepo as any,
     workspaces as any,
+    tokenUsage as any,
     registry,
     bus as any,
     credits as any,
@@ -190,13 +198,25 @@ describe('StepRunner.execute', () => {
     await runner.execute('run-1');
 
     expect(runRepo.get().status).toBe('failed');
-    // match_keywords (weight 3) fails; score_ats (weight 3) is blocked -> skipped.
-    // Total credit weight = 2+1+2+3+3 = 11. Charged 10. Refund = round(10 * 6/11) = 5.
-    expect(credits.refund).toHaveBeenCalledWith('user-1', 5, 'refund', 'run-1');
-    expect(runRepo.get().creditsRefunded).toBe(5);
+    // match_keywords fails; everything that depends on it (directly or transitively)
+    // is blocked: score_ats, optimize_resume, generate_cover_letter,
+    // build_learning_path, and finalize (which depends on everything).
+    // Lost credit weight = match_keywords(2) + score_ats(2) + optimize_resume(4) +
+    // generate_cover_letter(3) + build_learning_path(1) + finalize(1) = 13.
+    // Total credit weight across all 12 steps = 21. Charged 10.
+    // Refund = round(10 * 13/21) = 6.
+    expect(credits.refund).toHaveBeenCalledWith('user-1', 6, 'refund', 'run-1');
+    expect(runRepo.get().creditsRefunded).toBe(6);
     expect(
       steps.find((s) => s.name === 'score_ats')!.run,
     ).not.toHaveBeenCalled();
+    expect(
+      steps.find((s) => s.name === 'finalize')!.run,
+    ).not.toHaveBeenCalled();
+    // Steps that only depend on parse_resume/parse_jd are unaffected.
+    expect(
+      steps.find((s) => s.name === 'generate_interview_qs')!.run,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('retries a step once on a retryable provider error, then succeeds', async () => {
@@ -227,5 +247,89 @@ describe('StepRunner.execute', () => {
     await runner.execute('run-1');
 
     expect(runRepo.get().status).toBe('partial');
+  });
+
+  it('a failed optional step (research_company) yields a partial run with everything else completed', async () => {
+    const failing = new Error('Tavily down');
+    const steps = allSteps({
+      research_company: {
+        required: false, // matches the real ResearchCompanyStep's own property
+        run: jest.fn().mockRejectedValue(failing),
+      },
+    });
+    const { runner, runRepo } = build(steps);
+
+    await runner.execute('run-1');
+
+    expect(runRepo.get().status).toBe('partial');
+    expect(runRepo.get().failedSteps).toEqual(['research_company']);
+    // Nothing depends on research_company, so every other step still completes —
+    // including finalize, which depends on ALL steps (research_company included) but
+    // still runs because a failed OPTIONAL step still "resolves" the DAG wave.
+    for (const s of steps) {
+      if (s.name === 'research_company') continue;
+      expect(s.run).toHaveBeenCalled();
+    }
+  });
+
+  it('the JD-only branch (interview/company/salary) runs in the SAME wave as generate_embeddings, not serialised after it', async () => {
+    // Both generate_interview_qs and generate_embeddings depend only on
+    // parse_resume/parse_jd, so StepRunner's wave-based scheduler makes them ready at
+    // the same time and runs them via the same Promise.all — this is the actual
+    // mechanism behind "starts as soon as the JD is parsed, concurrently with the
+    // scoring branch" (score_ats itself is two waves further down, behind
+    // generate_embeddings -> match_keywords).
+    const startOrder: string[] = [];
+    let releaseEmbeddings!: () => void;
+    const embeddingsBlocked = new Promise<void>((resolve) => {
+      releaseEmbeddings = resolve;
+    });
+
+    const steps = allSteps({
+      generate_embeddings: {
+        run: jest.fn().mockImplementation(async () => {
+          startOrder.push('generate_embeddings:start');
+          await embeddingsBlocked;
+          startOrder.push('generate_embeddings:end');
+          return {};
+        }),
+      },
+      generate_interview_qs: {
+        run: jest.fn().mockImplementation(async () => {
+          startOrder.push('generate_interview_qs:start');
+          return {};
+        }),
+      },
+      research_company: {
+        run: jest.fn().mockImplementation(async () => {
+          startOrder.push('research_company:start');
+          return {};
+        }),
+      },
+      estimate_salary: {
+        run: jest.fn().mockImplementation(async () => {
+          startOrder.push('estimate_salary:start');
+          return {};
+        }),
+      },
+    });
+    const { runner } = build(steps);
+
+    const execution = runner.execute('run-1');
+    // Let the current wave's synchronous scheduling + microtasks settle while
+    // generate_embeddings is still deliberately hanging.
+    await new Promise((r) => setImmediate(r));
+
+    // The three JD-only steps have already STARTED (and, being unblocked, finished)
+    // even though generate_embeddings has not resolved yet — proof they were
+    // scheduled in the same wave, not serialised behind it.
+    expect(startOrder).toContain('generate_embeddings:start');
+    expect(startOrder).not.toContain('generate_embeddings:end');
+    expect(startOrder).toContain('generate_interview_qs:start');
+    expect(startOrder).toContain('research_company:start');
+    expect(startOrder).toContain('estimate_salary:start');
+
+    releaseEmbeddings();
+    await execution;
   });
 });

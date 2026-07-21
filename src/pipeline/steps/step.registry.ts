@@ -5,6 +5,13 @@ import { ParseJdStep } from './parse-jd.step';
 import { GenerateEmbeddingsStep } from './generate-embeddings.step';
 import { MatchKeywordsStep } from './match-keywords.step';
 import { ScoreAtsStep } from './score-ats.step';
+import { OptimizeResumeStep } from './optimize-resume.step';
+import { GenerateCoverLetterStep } from './generate-cover-letter.step';
+import { GenerateInterviewStep } from './generate-interview.step';
+import { BuildLearningPathStep } from './build-learning-path.step';
+import { ResearchCompanyStep } from './research-company.step';
+import { EstimateSalaryStep } from './estimate-salary.step';
+import { FinalizeStep } from './finalize.step';
 
 @Injectable()
 export class StepRegistry {
@@ -16,9 +23,28 @@ export class StepRegistry {
     embeddings: GenerateEmbeddingsStep,
     keywords: MatchKeywordsStep,
     ats: ScoreAtsStep,
-    // Later steps get appended here — nothing else changes.
+    optimize: OptimizeResumeStep,
+    coverLetter: GenerateCoverLetterStep,
+    interview: GenerateInterviewStep,
+    learningPath: BuildLearningPathStep,
+    company: ResearchCompanyStep,
+    salary: EstimateSalaryStep,
+    finalize: FinalizeStep,
   ) {
-    this.steps = [parseResume, parseJd, embeddings, keywords, ats];
+    this.steps = [
+      parseResume,
+      parseJd,
+      embeddings,
+      keywords,
+      ats,
+      optimize,
+      coverLetter,
+      interview,
+      learningPath,
+      company,
+      salary,
+      finalize,
+    ];
     this.assertValid();
   }
 

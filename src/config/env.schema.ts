@@ -59,6 +59,12 @@ export const envSchema = z.object({
   // get this many free credits on signup; a full analysis costs ANALYZE_CREDIT_COST
   // (src/workspaces/workspaces.service.ts) of them.
   SIGNUP_CREDIT_GRANT: z.coerce.number().default(100),
+
+  // Web search grounding for research_company / estimate_salary (Sprint 8) — without
+  // it, those prompts would answer from stale training data instead of real, current
+  // results. Both steps are optional (required: false), so an invalid/missing key
+  // degrades to a `partial` run rather than failing the whole analysis.
+  TAVILY_API_KEY: z.string().startsWith('tvly-'),
 });
 
 export type EnvType = z.infer<typeof envSchema>;

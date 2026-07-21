@@ -15,6 +15,12 @@ import { JobDescriptionsModule } from './job-descriptions/job-descriptions.modul
 import { AtsModule } from './ats/ats.module';
 import { CreditsModule } from './credits/credits.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
+import { ResumeVersionsModule } from './resume-versions/resume-versions.module';
+import { CoverLetterModule } from './cover-letter/cover-letter.module';
+import { InterviewModule } from './interview/interview.module';
+import { LearningRoadmapModule } from './learning-roadmap/learning-roadmap.module';
+import { CompanyModule } from './company/company.module';
+import { SalaryModule } from './salary/salary.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
@@ -52,6 +58,12 @@ import { dataSourceOptions } from './database/data-source';
     AtsModule,
     CreditsModule,
     WorkspacesModule,
+    ResumeVersionsModule,
+    CoverLetterModule,
+    InterviewModule,
+    LearningRoadmapModule,
+    CompanyModule,
+    SalaryModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard }, // protected by default (§7)

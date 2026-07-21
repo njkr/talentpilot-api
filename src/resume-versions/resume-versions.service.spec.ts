@@ -1,0 +1,283 @@
+import { createHash } from 'crypto';
+import { ResumeVersionsService } from './resume-versions.service';
+import { ResumeSection } from '../resumes/entities/resume-section.entity';
+import { ResumeVersion } from './entities/resume-version.entity';
+import { AiSuggestion } from '../suggestions/entities/ai-suggestion.entity';
+import { Workspace } from '../workspaces/entities/workspace.entity';
+
+function hash(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+function experienceSection(highlights: string[]) {
+  return {
+    id: 'sec-1',
+    resumeId: 'resume-1',
+    version: 1,
+    sectionType: 'experience' as const,
+    content: [
+      {
+        company: 'Acme Corp',
+        title: 'Engineer',
+        location: null,
+        startDate: '2020',
+        endDate: null,
+        isCurrent: true,
+        highlights,
+      },
+    ],
+    orderIndex: 0,
+    confidence: null,
+    aiGenerated: false,
+    editedByUser: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+function suggestion(overrides: Partial<AiSuggestion> = {}) {
+  return {
+    id: 'sug-1',
+    workspaceId: 'ws-1',
+    runId: 'run-1',
+    sectionType: 'experience' as const,
+    itemIndex: 0,
+    bulletIndex: 0,
+    oldText: 'Old bullet',
+    oldTextHash: hash('Old bullet'),
+    newText: 'New bullet',
+    reason: 'reason',
+    impact: 'high' as const,
+    keywordsAdded: [],
+    status: 'pending' as const,
+    appliedVersion: null,
+    decidedAt: null,
+    createdAt: new Date(),
+    ...overrides,
+  };
+}
+
+function fakeManager(sections: any[]) {
+  const saved: any[] = [];
+  const updates: any[] = [];
+  return {
+    saved,
+    updates,
+    find: jest.fn((entity: unknown) => {
+      if (entity === ResumeSection) return Promise.resolve(sections);
+      return Promise.resolve([]);
+    }),
+    findOne: jest.fn((entity: unknown) => {
+      if (entity === Workspace) {
+        return Promise.resolve({ id: 'ws-1', name: 'Acme — Backend Engineer' });
+      }
+      return Promise.resolve(null);
+    }),
+    create: jest.fn((_entity: unknown, data: unknown) => data),
+    save: jest.fn((entity: unknown, data: unknown) => {
+      saved.push({ entity, data });
+      return Promise.resolve(data);
+    }),
+    update: jest.fn((entity: unknown, criteria: unknown, patch: unknown) => {
+      updates.push({ entity, criteria, patch });
+      return Promise.resolve({ affected: 1 });
+    }),
+  };
+}
+
+function build() {
+  const resumes = { findOne: jest.fn() };
+  const sections = { find: jest.fn() };
+  const versions = { find: jest.fn() };
+  const suggestions = { find: jest.fn(), update: jest.fn() };
+  const workspaces = { findOne: jest.fn() };
+  const dataSource = { transaction: jest.fn() };
+
+  const service = new ResumeVersionsService(
+    resumes as any,
+    sections as any,
+    versions as any,
+    suggestions as any,
+    workspaces as any,
+    dataSource as any,
+  );
+  return {
+    service,
+    resumes,
+    sections,
+    versions,
+    suggestions,
+    workspaces,
+    dataSource,
+  };
+}
+
+describe('ResumeVersionsService.applySuggestions', () => {
+  it('applying 2 of 2 suggestions creates exactly ONE new version', async () => {
+    const { service, resumes, suggestions, dataSource } = build();
+    resumes.findOne.mockResolvedValue({
+      id: 'resume-1',
+      userId: 'user-1',
+      currentVersion: 1,
+    });
+    const original = experienceSection(['Old bullet A', 'Old bullet B']);
+    suggestions.find.mockResolvedValue([
+      suggestion({
+        id: 'sug-1',
+        bulletIndex: 0,
+        oldText: 'Old bullet A',
+        oldTextHash: hash('Old bullet A'),
+        newText: 'New bullet A',
+      }),
+      suggestion({
+        id: 'sug-2',
+        bulletIndex: 1,
+        oldText: 'Old bullet B',
+        oldTextHash: hash('Old bullet B'),
+        newText: 'New bullet B',
+      }),
+    ]);
+
+    let manager: ReturnType<typeof fakeManager>;
+    dataSource.transaction.mockImplementation(async (cb: any) => {
+      manager = fakeManager([original]);
+      return cb(manager);
+    });
+
+    const result = await service.applySuggestions(
+      'resume-1',
+      'user-1',
+      ['sug-1', 'sug-2'],
+      'ws-1',
+    );
+
+    expect(result).toEqual({ version: 2, applied: 2, skipped: [] });
+    // Exactly one ResumeVersion row saved.
+    const versionSaves = manager!.saved.filter(
+      (s) => s.entity === ResumeVersion,
+    );
+    expect(versionSaves).toHaveLength(1);
+    expect(versionSaves[0].data.suggestionsApplied).toBe(2);
+    // Both suggestions marked accepted.
+    const suggestionUpdates = manager!.updates.filter(
+      (u) => u.entity === AiSuggestion,
+    );
+    expect(suggestionUpdates).toHaveLength(2);
+    expect(suggestionUpdates.every((u) => u.patch.status === 'accepted')).toBe(
+      true,
+    );
+  });
+
+  it('refuses a suggestion if the bullet was hand-edited first, and the edit survives', async () => {
+    const { service, resumes, suggestions, dataSource } = build();
+    resumes.findOne.mockResolvedValue({
+      id: 'resume-1',
+      userId: 'user-1',
+      currentVersion: 1,
+    });
+    // The user has since edited this bullet — no longer matches oldTextHash.
+    const edited = experienceSection(['A hand-edited bullet']);
+    suggestions.find.mockResolvedValue([
+      suggestion({
+        id: 'sug-1',
+        oldText: 'Old bullet',
+        oldTextHash: hash('Old bullet'),
+      }),
+    ]);
+
+    let manager: ReturnType<typeof fakeManager>;
+    dataSource.transaction.mockImplementation(async (cb: any) => {
+      manager = fakeManager([edited]);
+      return cb(manager);
+    });
+
+    const result = await service.applySuggestions(
+      'resume-1',
+      'user-1',
+      ['sug-1'],
+      'ws-1',
+    );
+
+    expect(result.applied).toBe(0);
+    expect(result.skipped).toContain('sug-1');
+    // Marked stale, not silently dropped.
+    const staleUpdate = manager!.updates.find(
+      (u) => u.entity === AiSuggestion && u.patch.status === 'stale',
+    );
+    expect(staleUpdate).toBeTruthy();
+    // No new version created for a no-op apply.
+    expect(
+      manager!.saved.filter((s) => s.entity === ResumeVersion),
+    ).toHaveLength(0);
+    // The user's edit is untouched — content wasn't overwritten.
+    expect(edited.content[0].highlights).toEqual(['A hand-edited bullet']);
+  });
+
+  it('v1 sections are not mutated when v2 is created (deep clone, not reference)', async () => {
+    const { service, resumes, suggestions, dataSource } = build();
+    resumes.findOne.mockResolvedValue({
+      id: 'resume-1',
+      userId: 'user-1',
+      currentVersion: 1,
+    });
+    const original = experienceSection(['Old bullet']);
+    const beforeSnapshot = JSON.stringify(original.content);
+    suggestions.find.mockResolvedValue([suggestion()]);
+
+    dataSource.transaction.mockImplementation(async (cb: any) => {
+      const manager = fakeManager([original]);
+      return cb(manager);
+    });
+
+    await service.applySuggestions('resume-1', 'user-1', ['sug-1'], 'ws-1');
+
+    // The original section object (standing in for "the v1 row") is untouched —
+    // proves the clone(s) that got mutated were independent copies.
+    expect(JSON.stringify(original.content)).toBe(beforeSnapshot);
+  });
+});
+
+describe('ResumeVersionsService.restore', () => {
+  it('restoring copies FORWARD as a new version, not rewriting history', async () => {
+    const { service, resumes, dataSource } = build();
+    resumes.findOne.mockResolvedValue({
+      id: 'resume-1',
+      userId: 'user-1',
+      currentVersion: 3,
+    });
+    const v1 = experienceSection(['v1 bullet']);
+
+    let manager: ReturnType<typeof fakeManager>;
+    dataSource.transaction.mockImplementation(async (cb: any) => {
+      manager = fakeManager([v1]);
+      return cb(manager);
+    });
+
+    const result = await service.restore('resume-1', 'user-1', 1);
+
+    expect(result.version).toBe(4);
+    const versionSaves = manager!.saved.filter(
+      (s) => s.entity === ResumeVersion,
+    );
+    expect(versionSaves).toHaveLength(1);
+    expect(versionSaves[0].data.createdBy).toBe('restore');
+    const sectionSaves = manager!.saved.filter(
+      (s) => s.entity === ResumeSection,
+    );
+    expect(sectionSaves[0].data[0].version).toBe(4);
+  });
+
+  it('throws when the target version does not exist', async () => {
+    const { service, resumes, dataSource } = build();
+    resumes.findOne.mockResolvedValue({
+      id: 'resume-1',
+      userId: 'user-1',
+      currentVersion: 2,
+    });
+    dataSource.transaction.mockImplementation(async (cb: any) =>
+      cb(fakeManager([])),
+    );
+
+    await expect(service.restore('resume-1', 'user-1', 99)).rejects.toThrow();
+  });
+});

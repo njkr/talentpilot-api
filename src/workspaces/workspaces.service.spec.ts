@@ -122,7 +122,7 @@ describe('WorkspacesService.analyze', () => {
       service.analyze('ws-1', 'user-1', 'key-1'),
     ).rejects.toMatchObject({
       code: 'INSUFFICIENT_CREDITS',
-      details: { required: 10, balance: 3 },
+      details: { required: 21, balance: 3 },
     });
     expect(dataSource.transaction).not.toHaveBeenCalled();
   });

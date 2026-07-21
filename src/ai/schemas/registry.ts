@@ -4,6 +4,13 @@ import { resumeExtractionSchema } from './resume-extraction.schema';
 import { jdAnalysisSchema } from './jd-analysis.schema';
 import { keywordEquivalenceSchema } from './keyword-equivalence.schema';
 import { atsGradingSchema } from './ats-grading.schema';
+import { resumeOptimizationSchema } from './resume-optimization.schema';
+import { coverLetterSchema } from './cover-letter.schema';
+import { interviewQuestionsSchema } from './interview-questions.schema';
+import { interviewFeedbackSchema } from './interview-feedback.schema';
+import { learningRoadmapSchema } from './learning-roadmap.schema';
+import { companySynthesisSchema } from './company-synthesis.schema';
+import { salaryEstimateSchema } from './salary-estimate.schema';
 
 /**
  * PromptTemplate rows store `schemaKey` as a plain string (jsonb/DB can't hold a Zod
@@ -15,6 +22,13 @@ export const SCHEMA_REGISTRY = {
   jd_analysis: jdAnalysisSchema,
   keyword_equivalence: keywordEquivalenceSchema,
   ats_grading: atsGradingSchema,
+  resume_optimization: resumeOptimizationSchema,
+  cover_letter: coverLetterSchema,
+  interview_questions: interviewQuestionsSchema,
+  interview_feedback: interviewFeedbackSchema,
+  learning_roadmap: learningRoadmapSchema,
+  company_synthesis: companySynthesisSchema,
+  salary_estimate: salaryEstimateSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 export type SchemaKey = keyof typeof SCHEMA_REGISTRY;

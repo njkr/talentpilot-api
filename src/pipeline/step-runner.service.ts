@@ -16,6 +16,7 @@ import { ProgressBus } from './progress/progress.bus';
 import { ContextHydrator } from './context-hydrator.service';
 import { CreditService } from '../credits/credit.service';
 import { AppException } from '../common/exceptions/app.exception';
+import { TokenUsage } from '../ai/entities/token-usage.entity';
 
 // One step-level retry attempt is warranted for a transient provider outage — this is
 // distinct from (and on top of) AiService's own internal retries: this layer retries
@@ -36,6 +37,8 @@ export class StepRunner {
     private readonly stepRows: Repository<PipelineStepRow>,
     @InjectRepository(Workspace)
     private readonly workspaces: Repository<Workspace>,
+    @InjectRepository(TokenUsage)
+    private readonly tokenUsage: Repository<TokenUsage>,
     private readonly registry: StepRegistry,
     private readonly bus: ProgressBus,
     private readonly credits: CreditService,
@@ -78,6 +81,17 @@ export class StepRunner {
       if (p.status === 'completed' || p.status === 'skipped') done.add(p.name);
     }
 
+    // A dependency counts as "resolved" (safe to proceed past) if it either completed,
+    // or failed but was OPTIONAL — an optional step's failure must not permanently
+    // block everything downstream of it. This matters most for `finalize`, which
+    // depends on every other step including the optional ones (research_company,
+    // estimate_salary): without this, one dead Tavily key would cascade into blocking
+    // `finalize` itself, turning what should be a `partial` run into a hard `failed`
+    // one — defeating the entire point of marking those steps optional.
+    const dependencyResolved = (name: string) =>
+      done.has(name) ||
+      (failed.has(name) && !this.registry.get(name)?.required);
+
     // ── DAG execution, wave by wave ──
     // Steps whose dependencies are satisfied run in parallel.
     while (done.size + failed.size < steps.length) {
@@ -85,7 +99,7 @@ export class StepRunner {
         (s) =>
           !done.has(s.name) &&
           !failed.has(s.name) &&
-          s.dependsOn.every((d) => done.has(d)),
+          s.dependsOn.every(dependencyResolved),
       );
 
       if (!ready.length) {
@@ -157,6 +171,7 @@ export class StepRunner {
         await this.markStep(run.id, step.name, 'completed', {
           attempt,
           outputRef: result.outputRef,
+          costUsd: await this.stepCost(run.id, step.name),
         });
         this.bus.publish(run.id, {
           type: 'step.completed',
@@ -189,6 +204,11 @@ export class StepRunner {
             attempt,
             error: err instanceof Error ? err.message : String(err),
             errorType: code ?? 'unknown',
+            // A step can fail AFTER making one or more real (billed) AI calls — e.g.
+            // the optimiser generates suggestions, then a later save fails. That
+            // spend actually happened and belongs in the run's total, not silently
+            // dropped because the step itself didn't finish.
+            costUsd: await this.stepCost(run.id, step.name),
           });
           return false;
         }
@@ -196,6 +216,21 @@ export class StepRunner {
       }
     }
     return false;
+  }
+
+  /**
+   * Real spend for one step, summed from token_usage — every AiService.complete()/
+   * embed() call already tags its usage row with (runId, stepName), so this is exact,
+   * not estimated. A step attempt that made zero AI calls (e.g. a pure-DB step, or one
+   * that failed before ever calling out) correctly sums to 0.
+   */
+  private async stepCost(runId: string, name: string): Promise<string> {
+    const row = await this.tokenUsage
+      .createQueryBuilder('u')
+      .select('COALESCE(SUM(u.costUsd), 0)', 'c')
+      .where('u.runId = :runId AND u.stepName = :name', { runId, name })
+      .getRawOne<{ c: string }>();
+    return row?.c ?? '0';
   }
 
   /** Weighted progress — a 25-weight step moves the bar five times as far as a 5-weight one. */
