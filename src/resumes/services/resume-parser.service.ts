@@ -2,16 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AiService } from '../../ai/ai.service';
-import { PromptsService } from '../../prompts/prompts.service';
-import { TokenCounterService } from '../../ai/services/token-counter.service';
 import { ResumeExtraction } from '../../ai/schemas/resume-extraction.schema';
 import { ResumeSection, SectionType } from '../entities/resume-section.entity';
 import { Resume } from '../entities/resume.entity';
-
-// Fixed margin beyond the model's declared max_completion_tokens: system+user template
-// scaffolding (the instructions text, not the resume itself) plus a little slack so a
-// preflight "fits" check can't be defeated by rounding.
-const PROMPT_OVERHEAD_TOKENS = 300;
 
 @Injectable()
 export class ResumeParserService {
@@ -19,8 +12,6 @@ export class ResumeParserService {
 
   constructor(
     private readonly ai: AiService,
-    private readonly prompts: PromptsService,
-    private readonly tokenCounter: TokenCounterService,
     @InjectRepository(ResumeSection)
     private readonly sectionRepo: Repository<ResumeSection>,
   ) {}
@@ -30,21 +21,11 @@ export class ResumeParserService {
       throw new Error(`Resume ${resume.id} has no extracted text to parse`);
     }
 
-    const template = await this.prompts.getActive('resume_extraction');
-    const budget =
-      this.tokenCounter.contextWindowFor(template.model) -
-      template.maxTokens -
-      PROMPT_OVERHEAD_TOKENS;
-    const resumeText = this.tokenCounter.truncateToTokens(
-      template.model,
-      resume.rawText,
-      Math.max(budget, 0),
-    );
-
     const { data, usage } = await this.ai.complete<ResumeExtraction>({
       feature: 'resume_extraction',
       promptKey: 'resume_extraction',
-      variables: { resume_text: resumeText },
+      variables: { resume_text: resume.rawText },
+      truncateVariable: 'resume_text',
       userId: resume.userId,
       runId: resume.id,
       stepName: 'extract',

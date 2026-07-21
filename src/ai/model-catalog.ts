@@ -43,3 +43,38 @@ export function getModelSpec(model: string): ModelSpec {
   }
   return spec;
 }
+
+export interface EmbeddingModelSpec {
+  dimensions: number;
+  maxInputTokens: number; // per input item, not per request
+  pricePerM: number; // USD per 1M input tokens — embeddings have no completion tokens
+}
+
+export const EMBEDDING_MODEL_CATALOG: Record<string, EmbeddingModelSpec> = {
+  'text-embedding-3-small': {
+    dimensions: 1536,
+    maxInputTokens: 8191,
+    pricePerM: 0.02,
+  },
+  'text-embedding-3-large': {
+    dimensions: 3072,
+    maxInputTokens: 8191,
+    pricePerM: 0.13,
+  },
+};
+
+// The one embedding model this deployment actually uses. Single source of truth for
+// AiService (what it calls), ChunkerService (what it token-counts against), and the
+// `embeddings.embedding` column (vector(1536), sized for this model's dimensions) —
+// change it here and the column width in the migration together, not separately.
+export const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
+
+export function getEmbeddingModelSpec(model: string): EmbeddingModelSpec {
+  const spec = EMBEDDING_MODEL_CATALOG[model];
+  if (!spec) {
+    throw new Error(
+      `Unknown embedding model "${model}" — add it to EMBEDDING_MODEL_CATALOG first`,
+    );
+  }
+  return spec;
+}

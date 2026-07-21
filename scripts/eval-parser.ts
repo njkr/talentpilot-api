@@ -13,6 +13,7 @@ import { PromptTemplate } from '../src/prompts/entities/prompt-template.entity';
 import { TokenUsage } from '../src/ai/entities/token-usage.entity';
 import { PromptsService } from '../src/prompts/prompts.service';
 import { PricingService } from '../src/ai/services/pricing.service';
+import { TokenCounterService } from '../src/ai/services/token-counter.service';
 import { BudgetService } from '../src/ai/services/budget.service';
 import { AiService } from '../src/ai/ai.service';
 import { validateEnv } from '../src/config/env.schema';
@@ -120,7 +121,7 @@ async function main() {
     const prompts = new PromptsService(dataSource.getRepository(PromptTemplate), dataSource);
     const pricing = new PricingService();
     const budget = new BudgetService(dataSource.getRepository(TokenUsage), fakeEnv);
-    const ai = new AiService(fakeEnv, prompts, pricing, budget);
+    const ai = new AiService(fakeEnv, prompts, pricing, budget, new TokenCounterService());
     await ai.onModuleInit();
 
     const fixturesDir = join(__dirname, '..', 'eval', 'resumes');

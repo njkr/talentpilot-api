@@ -44,6 +44,9 @@ import { PlanLimitService } from 'src/subscriptions/plan-limit.service';
     TextExtractorService,
     PlanLimitService,
   ],
-  exports: [ResumesService],
+  // FileValidatorService/TextExtractorService are file-format concerns, not resume-
+  // specific — JobDescriptionsModule reuses them for JD file uploads rather than
+  // duplicating magic-byte sniffing and PDF/DOCX extraction a second time.
+  exports: [ResumesService, FileValidatorService, TextExtractorService],
 })
 export class ResumesModule {}

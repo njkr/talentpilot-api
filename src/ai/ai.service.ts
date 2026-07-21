@@ -6,14 +6,22 @@ import { AppException, ErrorCode } from '../common/exceptions/app.exception';
 import { Problems } from '../common/problems';
 import { AiError } from './ai.errors';
 import { PromptsService } from '../prompts/prompts.service';
+import { PromptTemplate } from '../prompts/entities/prompt-template.entity';
 import { PricingService } from './services/pricing.service';
+import { TokenCounterService } from './services/token-counter.service';
 import { BudgetService } from './services/budget.service';
 import { getResponseFormat } from './schemas/registry';
+import { DEFAULT_EMBEDDING_MODEL } from './model-catalog';
 
 export interface AiCompleteOptions {
   feature: string;
   promptKey: string;
   variables: Record<string, string>;
+  // If set and the rendered prompt won't fit the model's context window, this ONE
+  // variable's value is truncated to make it fit — not the whole prompt. Callers pass
+  // the name of whichever variable holds the large, truncatable body text (resume_text,
+  // jd_text, ...); fixed instruction text in the template is never touched.
+  truncateVariable?: string;
   userId?: string | null;
   workspaceId?: string | null;
   runId?: string | null;
@@ -34,11 +42,28 @@ export interface AiCompleteResult<T> {
   usage: AiUsageSummary;
 }
 
+export interface AiEmbedOptions {
+  feature: string;
+  userId?: string | null;
+  workspaceId?: string | null;
+  runId?: string | null;
+  stepName?: string | null;
+}
+
+export interface AiEmbedResult {
+  vectors: number[][];
+  usage: { promptTokens: number; costUsd: string; durationMs: number };
+}
+
 // One initial attempt + one repair retry. Only 'invalid_output' ever consumes the
 // second attempt — every other AiErrorType is not retryable at this layer (rate limits
 // and provider outages are already retried inside the SDK's own maxRetries; by the time
 // an error reaches us here, retrying again immediately would just waste money).
 const MAX_ATTEMPTS = 2;
+
+// Slack beyond max_completion_tokens for the fixed instruction text in system/user
+// templates — the part of the prompt that ISN'T the truncatable variable.
+const CONTEXT_OVERHEAD_MARGIN = 300;
 
 @Injectable()
 export class AiService implements OnModuleInit {
@@ -51,6 +76,7 @@ export class AiService implements OnModuleInit {
     private readonly prompts: PromptsService,
     private readonly pricing: PricingService,
     private readonly budget: BudgetService,
+    private readonly tokenCounter: TokenCounterService,
   ) {
     this.client = new OpenAI({
       apiKey: this.env.get('OPENAI_API_KEY'),
@@ -76,7 +102,10 @@ export class AiService implements OnModuleInit {
     await this.budget.assertWithinBudget(userId);
 
     const template = await this.prompts.getActive(opts.promptKey);
-    const { system, user } = this.prompts.render(template, opts.variables);
+    const variables = opts.truncateVariable
+      ? this.fitVariables(template, opts.variables, opts.truncateVariable)
+      : opts.variables;
+    const { system, user } = this.prompts.render(template, variables);
     const messages = [
       { role: 'system' as const, content: system },
       { role: 'user' as const, content: user },
@@ -217,6 +246,123 @@ export class AiService implements OnModuleInit {
     throw this.toAppException(
       lastAiError ?? new AiError('unknown', 'AI call failed', false),
     );
+  }
+
+  /**
+   * If the fully-rendered prompt won't fit (model context window minus reserved
+   * completion tokens minus a fixed overhead margin), truncates ONLY `truncateVariable`'s
+   * value by however many tokens it's over. Leaves everything else untouched — a no-op
+   * when the prompt already fits, which is the common case.
+   */
+  private fitVariables(
+    template: PromptTemplate,
+    variables: Record<string, string>,
+    truncateVariable: string,
+  ): Record<string, string> {
+    if (!(truncateVariable in variables)) return variables;
+
+    const { system, user } = this.prompts.render(template, variables);
+    const messages = [
+      { role: 'system' as const, content: system },
+      { role: 'user' as const, content: user },
+    ];
+    const budget =
+      this.tokenCounter.contextWindowFor(template.model) -
+      template.maxTokens -
+      CONTEXT_OVERHEAD_MARGIN;
+    const totalTokens = this.tokenCounter.countMessages(
+      template.model,
+      messages,
+    );
+    if (totalTokens <= budget) return variables;
+
+    const original = variables[truncateVariable];
+    const originalTokens = this.tokenCounter.countText(
+      template.model,
+      original,
+    );
+    const overshoot = totalTokens - budget;
+    const newBudget = Math.max(originalTokens - overshoot, 0);
+
+    return {
+      ...variables,
+      [truncateVariable]: this.tokenCounter.truncateToTokens(
+        template.model,
+        original,
+        newBudget,
+      ),
+    };
+  }
+
+  /**
+   * Batches a set of texts into embedding vectors. No retry/repair logic here (there's
+   * no JSON schema to violate — a successful response is either the vectors or it
+   * isn't), but shares the budget guard, concurrency limiter, and metering with complete().
+   */
+  async embed(inputs: string[], opts: AiEmbedOptions): Promise<AiEmbedResult> {
+    const userId = opts.userId ?? null;
+    await this.budget.assertWithinBudget(userId);
+
+    const startedAt = Date.now();
+    try {
+      const response = await this.limit(() =>
+        this.client.embeddings.create({
+          model: DEFAULT_EMBEDDING_MODEL,
+          input: inputs,
+        }),
+      );
+      const durationMs = Date.now() - startedAt;
+      const promptTokens = response.usage.prompt_tokens;
+      const costUsd = this.pricing.computeEmbeddingCostUsd({
+        model: DEFAULT_EMBEDDING_MODEL,
+        tokens: promptTokens,
+      });
+
+      await this.safeRecordUsage({
+        userId,
+        workspaceId: opts.workspaceId ?? null,
+        runId: opts.runId ?? null,
+        stepName: opts.stepName ?? null,
+        feature: opts.feature,
+        model: DEFAULT_EMBEDDING_MODEL,
+        promptTokens,
+        completionTokens: 0,
+        costUsd,
+        durationMs,
+        attempts: 1,
+        success: true,
+      });
+
+      // Response order matches request order per the API contract, but sort explicitly
+      // by index rather than trust that — cheap insurance against a caller assumption bug.
+      const vectors = [...response.data]
+        .sort((a, b) => a.index - b.index)
+        .map((d) => d.embedding);
+
+      return { vectors, usage: { promptTokens, costUsd, durationMs } };
+    } catch (err) {
+      const durationMs = Date.now() - startedAt;
+      const aiErr = AiError.fromOpenAI(err);
+      this.logger.warn(
+        `Embedding call failed (feature=${opts.feature}): ${aiErr.type} — ${aiErr.message}`,
+      );
+      await this.safeRecordUsage({
+        userId,
+        workspaceId: opts.workspaceId ?? null,
+        runId: opts.runId ?? null,
+        stepName: opts.stepName ?? null,
+        feature: opts.feature,
+        model: DEFAULT_EMBEDDING_MODEL,
+        promptTokens: 0,
+        completionTokens: 0,
+        costUsd: '0.000000',
+        durationMs,
+        attempts: 1,
+        success: false,
+        errorType: aiErr.type,
+      });
+      throw this.toAppException(aiErr);
+    }
   }
 
   /** Never throws — a failed metering write must not mask the real outcome of the call. */

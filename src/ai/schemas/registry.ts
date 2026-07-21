@@ -1,6 +1,8 @@
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 import { resumeExtractionSchema } from './resume-extraction.schema';
+import { jdAnalysisSchema } from './jd-analysis.schema';
+import { keywordEquivalenceSchema } from './keyword-equivalence.schema';
 
 /**
  * PromptTemplate rows store `schemaKey` as a plain string (jsonb/DB can't hold a Zod
@@ -9,6 +11,8 @@ import { resumeExtractionSchema } from './resume-extraction.schema';
  */
 export const SCHEMA_REGISTRY = {
   resume_extraction: resumeExtractionSchema,
+  jd_analysis: jdAnalysisSchema,
+  keyword_equivalence: keywordEquivalenceSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 export type SchemaKey = keyof typeof SCHEMA_REGISTRY;

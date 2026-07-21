@@ -44,4 +44,24 @@ describe('PricingService', () => {
       }),
     ).toThrow(/Unknown model/);
   });
+
+  describe('computeEmbeddingCostUsd', () => {
+    it('bills embeddings at a flat per-input-token rate (no completion tokens)', () => {
+      // text-embedding-3-small: $0.02/1M tokens
+      const cost = service.computeEmbeddingCostUsd({
+        model: 'text-embedding-3-small',
+        tokens: 1_000_000,
+      });
+      expect(cost).toBe('0.020000');
+    });
+
+    it('throws for an unpriced embedding model', () => {
+      expect(() =>
+        service.computeEmbeddingCostUsd({
+          model: 'not-a-real-model',
+          tokens: 100,
+        }),
+      ).toThrow(/Unknown embedding model/);
+    });
+  });
 });

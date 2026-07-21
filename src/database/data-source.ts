@@ -10,6 +10,8 @@ import { ResumeSection } from '../resumes/entities/resume-section.entity';
 import { Workspace } from '../workspaces/entities/workspace.entity';
 import { PromptTemplate } from '../prompts/entities/prompt-template.entity';
 import { TokenUsage } from '../ai/entities/token-usage.entity';
+import { JobDescription } from '../job-descriptions/entities/job-description.entity';
+import { Embedding } from '../embeddings/entities/embedding.entity';
 
 // Single source of truth for the DB connection, shared by:
 //  - the Nest app (via TypeOrmModule.forRootAsync in app.module.ts)
@@ -31,6 +33,8 @@ export const dataSourceOptions: DataSourceOptions = {
     Workspace,
     PromptTemplate,
     TokenUsage,
+    JobDescription,
+    Embedding,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   synchronize: false, // migrations only — see Sprint 1 §2

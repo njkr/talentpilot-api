@@ -171,4 +171,18 @@ export const Problems = {
       ErrorCode.AI_CONTENT_FILTERED,
       'This content was flagged by the AI provider and could not be processed.',
     ),
+
+  // ── Sprint 4: job descriptions & matching ──────────────────────────────────
+  jdTooShort: () =>
+    new AppException(
+      ErrorCode.JD_TOO_SHORT,
+      'Paste the full job description — this looks incomplete.',
+    ),
+
+  jdNotReady: (status: string) =>
+    new AppException(
+      ErrorCode.JD_NOT_ANALYZED,
+      `This job description is not ready to match against (status: ${status}).`,
+      { status },
+    ),
 };

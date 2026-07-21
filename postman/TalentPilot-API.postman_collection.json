@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "cd40433b-b434-486e-b73e-1e8a8b97422e",
-    "name": "TalentPilot API — Auth, Accounts, Profiles & Resumes (Sprints 1-3)",
-    "description": "## Response envelope\nEvery 2xx response is `{ success: true, data, meta }`. Every error is `{ success: false, error: { code, message, details?, fields? }, meta }` — `code` is one of the `ErrorCode` values in `common/exceptions/app.exception.ts` (e.g. `INVALID_CREDENTIALS`, `OTP_EXPIRED`, `TOKEN_SUPERSEDED`, `PLAN_LIMIT_REACHED`, `RESUME_IN_USE`). `meta` always carries `requestId` + `timestamp`; paginated list endpoints also put `nextCursor`/`hasMore` in `meta` (not top-level).\n\n## Auth model\n- **Access token**: short-lived JWT (`JWT_ACCESS_TTL`, default 15m). Sent as `Authorization: Bearer <token>` — the collection auto-fills this from the `accessToken` variable, which Register/Verify/Login/Refresh test scripts populate automatically.\n- **Refresh token**: opaque, rotating, lives in an httpOnly `tp_rt` cookie scoped to `/api/v1/auth`. Postman's cookie jar stores and resends it automatically like a browser — nothing to configure, just run requests in order within one Postman session.\n\n## Suggested run order (folders are already in this order top to bottom)\n1. **Register** → generates a fresh `{{email}}` each run\n2. **Verify Email** → fill `otpCode` from the email/logs first (see its description for the dev caveat)\n3. **Login** — alternative to step 2 if already verified; also works pre-verification\n4. **Refresh Token** → rotates the session\n5. **Get Me** / **Update Me**\n6. **Get Profile** / **Update Profile**\n7. **Upload Resume** (select a real PDF/DOCX in the `file` field) → captures `{{resumeId}}` → **List/Get/Rename/Download/Retry Resumes**\n7b. Once `status` reaches `parsed` (extraction + AI parsing both run automatically on the worker), **List Resume Sections** → **Update Resume Section** to view/edit the extracted fields → **Delete Resume** last\n8. **List Sessions** / **Revoke Session** — do this *before* Logout, or the session you just revoked (Logout) won't be there to list\n9. **Forgot Password** → fill `resetToken`, then **Reset Password**\n10. **Logout** / **Delete Me** — destructive/terminal, kept last on purpose\n\n## Resumes notes\n- Upload requires a **verified** email and a free plan slot (max 3 resumes/user) — both surface as 403.\n- Parsing is two automatic stages on the separate **worker** process (`pnpm start:worker`): text extraction (`uploaded` → `extracting` → `extracted`), then AI structuring (`extracted` → `parsing` → `parsed`). If a resume sits at `uploaded` or `extracted` forever, the worker isn't running, not a bug.\n- AI structuring calls OpenAI (`OPENAI_API_KEY` required) and is metered/budget-capped (`AI_USER_DAILY_BUDGET_USD` / `AI_GLOBAL_DAILY_BUDGET_USD`) — a resume stuck at `parsing` with a 429/`AI_BUDGET_EXCEEDED` in `parseError` means the budget or kill switch, not a bug either.\n- **Sections** (`personal_info`, `summary`, `skills`, `experience`, `projects`, `education`, `certifications`, `languages`) only exist once `status` is `parsed`. Editing a section via **Update Resume Section** marks it `editedByUser: true` so it survives a future re-parse.\n- Storage is MinIO locally (`docker compose up -d minio`) — the same code talks to real AWS S3 or Cloudflare R2 in other environments.\n\nImport `TalentPilot-API.postman_environment.json` alongside this collection and select it as your active environment before running anything.",
+    "name": "TalentPilot API — Auth, Accounts, Profiles & Resumes (Sprints 1-4)",
+    "description": "## Response envelope\nEvery 2xx response is `{ success: true, data, meta }`. Every error is `{ success: false, error: { code, message, details?, fields? }, meta }` — `code` is one of the `ErrorCode` values in `common/exceptions/app.exception.ts` (e.g. `INVALID_CREDENTIALS`, `OTP_EXPIRED`, `TOKEN_SUPERSEDED`, `PLAN_LIMIT_REACHED`, `RESUME_IN_USE`). `meta` always carries `requestId` + `timestamp`; paginated list endpoints also put `nextCursor`/`hasMore` in `meta` (not top-level).\n\n## Auth model\n- **Access token**: short-lived JWT (`JWT_ACCESS_TTL`, default 15m). Sent as `Authorization: Bearer <token>` — the collection auto-fills this from the `accessToken` variable, which Register/Verify/Login/Refresh test scripts populate automatically.\n- **Refresh token**: opaque, rotating, lives in an httpOnly `tp_rt` cookie scoped to `/api/v1/auth`. Postman's cookie jar stores and resends it automatically like a browser — nothing to configure, just run requests in order within one Postman session.\n\n## Suggested run order (folders are already in this order top to bottom)\n1. **Register** → generates a fresh `{{email}}` each run\n2. **Verify Email** → fill `otpCode` from the email/logs first (see its description for the dev caveat)\n3. **Login** — alternative to step 2 if already verified; also works pre-verification\n4. **Refresh Token** → rotates the session\n5. **Get Me** / **Update Me**\n6. **Get Profile** / **Update Profile**\n7. **Upload Resume** (select a real PDF/DOCX in the `file` field) → captures `{{resumeId}}` → **List/Get/Rename/Download/Retry Resumes**\n7b. Once `status` reaches `parsed` (extraction + AI parsing both run automatically on the worker), **List Resume Sections** → **Update Resume Section** to view/edit the extracted fields\n8. **Paste Job Description** (or **Upload Job Description**) → captures `{{jdId}}`, analysed inline → **Score Resume Against Job Description** to match it against the resume from step 7 → **Delete Resume** / **Delete Job Description** last\n9. **List Sessions** / **Revoke Session** — do this *before* Logout, or the session you just revoked (Logout) won't be there to list\n10. **Forgot Password** → fill `resetToken`, then **Reset Password**\n11. **Logout** / **Delete Me** — destructive/terminal, kept last on purpose\n\n## Resumes notes\n- Upload requires a **verified** email and a free plan slot (max 3 resumes/user) — both surface as 403.\n- Parsing is two automatic stages on the separate **worker** process (`pnpm start:worker`): text extraction (`uploaded` → `extracting` → `extracted`), then AI structuring (`extracted` → `parsing` → `parsed`). If a resume sits at `uploaded` or `extracted` forever, the worker isn't running, not a bug.\n- AI structuring calls OpenAI (`OPENAI_API_KEY` required) and is metered/budget-capped (`AI_USER_DAILY_BUDGET_USD` / `AI_GLOBAL_DAILY_BUDGET_USD`) — a resume stuck at `parsing` with a 429/`AI_BUDGET_EXCEEDED` in `parseError` means the budget or kill switch, not a bug either.\n- **Sections** (`personal_info`, `summary`, `skills`, `experience`, `projects`, `education`, `certifications`, `languages`) only exist once `status` is `parsed`. Editing a section via **Update Resume Section** marks it `editedByUser: true` so it survives a future re-parse.\n\n## Job descriptions & matching notes\n- Job descriptions are analysed **inline** (not queued) — the paste/upload response already carries `status: analyzed` with parsed requirements and skills, typically within a few seconds.\n- Pasting/uploading text that normalizes to the same content hash for the same user returns the existing analysed row instead of paying for a second AI call.\n- **Score Resume Against Job Description** requires the resume to be `parsed` and the JD to be `analyzed` first — otherwise it 409s with `RESUME_NOT_PARSED` or `JD_NOT_ANALYZED`.\n- Re-running a match after editing neither side is free: embeddings are content-hashed per chunk, so unchanged chunks are reused (`stats.resume.reused` / `stats.jd.reused`) instead of re-embedded.\n- Storage is MinIO locally (`docker compose up -d minio`) — the same code talks to real AWS S3 or Cloudflare R2 in other environments.\n\nImport `TalentPilot-API.postman_environment.json` alongside this collection and select it as your active environment before running anything.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -2063,6 +2063,395 @@
       ]
     },
     {
+      "name": "Job Descriptions",
+      "item": [
+        {
+          "name": "Paste Job Description",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/job-descriptions/paste",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "job-descriptions",
+                "paste"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Senior Backend Engineer at Acme Corp.\\n\\nWe are looking for a Senior Backend Engineer with 5+ years of experience.\\n\\nRequirements:\\n- 5+ years of experience with Node.js and TypeScript, required\\n- Experience with PostgreSQL, required\\n- Familiarity with Kubernetes, preferred\\n\\nAcme Corp is an equal opportunity employer offering great benefits.\",\n  \"position\": \"Senior Backend Engineer\",\n  \"company\": \"Acme Corp\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Analysed inline (a few seconds) — the response already carries parsed requirements and skills. Pasting the same text twice returns the existing analysed row instead of paying for a second AI call.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set('jdId', json.data.id); pm.collectionVariables.set('jdId', json.data.id);",
+                  "  pm.test('JD id captured', () => pm.expect(json.data.id).to.be.a('string'));",
+                  "  pm.test('Status is analyzed', () => pm.expect(json.data.status).to.eql('analyzed'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/job-descriptions/paste",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "job-descriptions",
+                    "paste"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{ \"text\": \"...\", \"position\": \"Senior Backend Engineer\", \"company\": \"Acme Corp\" }"
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{jdId}}\",\n    \"company\": \"Acme Corp\",\n    \"position\": \"Senior Backend Engineer\",\n    \"source\": \"paste\",\n    \"employmentType\": null,\n    \"location\": null,\n    \"remoteType\": \"unknown\",\n    \"experienceRequired\": \"5+ years\",\n    \"salaryMin\": null,\n    \"salaryMax\": null,\n    \"salaryCurrency\": null,\n    \"parsedData\": {\n      \"company\": \"Acme Corp\",\n      \"position\": \"Senior Backend Engineer\",\n      \"seniority\": \"senior\",\n      \"requirements\": [\n        {\n          \"text\": \"5+ years of experience with Node.js\",\n          \"category\": \"experience\",\n          \"importance\": \"required\"\n        },\n        {\n          \"text\": \"5+ years of experience with TypeScript\",\n          \"category\": \"experience\",\n          \"importance\": \"required\"\n        },\n        {\n          \"text\": \"Experience with PostgreSQL\",\n          \"category\": \"experience\",\n          \"importance\": \"required\"\n        },\n        {\n          \"text\": \"Familiarity with Kubernetes\",\n          \"category\": \"experience\",\n          \"importance\": \"preferred\"\n        }\n      ],\n      \"skills\": [\n        {\n          \"name\": \"Node.js\",\n          \"category\": \"language\",\n          \"importance\": \"required\"\n        },\n        {\n          \"name\": \"TypeScript\",\n          \"category\": \"language\",\n          \"importance\": \"required\"\n        },\n        {\n          \"name\": \"PostgreSQL\",\n          \"category\": \"database\",\n          \"importance\": \"required\"\n        },\n        {\n          \"name\": \"Kubernetes\",\n          \"category\": \"tool\",\n          \"importance\": \"preferred\"\n        }\n      ],\n      \"responsibilities\": [],\n      \"keywords\": [\n        \"Node.js\",\n        \"TypeScript\",\n        \"PostgreSQL\",\n        \"Kubernetes\"\n      ]\n    },\n    \"status\": \"analyzed\",\n    \"parseError\": null,\n    \"createdAt\": \"2026-07-20T17:20:54.318Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-20T17:21:09.088Z\"\n  }\n}"
+            },
+            {
+              "name": "422 Too Short",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/job-descriptions/paste",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "job-descriptions",
+                    "paste"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{ \"text\": \"too short\" }"
+                }
+              },
+              "status": "Unprocessable Entity",
+              "code": 422,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"JD_TOO_SHORT\",\n    \"message\": \"Paste the full job description — this looks incomplete.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-20T17:21:09.088Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Upload Job Description",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/job-descriptions/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "job-descriptions",
+                "upload"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "description": "PDF or DOCX only, same magic-byte validation and text extraction as resume upload.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Job Descriptions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/job-descriptions?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "job-descriptions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Job Description",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/job-descriptions/{{jdId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "job-descriptions",
+                "{{jdId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Retry JD Analysis",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/job-descriptions/{{jdId}}/retry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "job-descriptions",
+                "{{jdId}}",
+                "retry"
+              ]
+            },
+            "description": "Only meaningful when status is `failed` — re-runs the jd_analysis prompt.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Job Description",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/job-descriptions/{{jdId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "job-descriptions",
+                "{{jdId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Matching",
+      "item": [
+        {
+          "name": "Score Resume Against Job Description",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resumes/{{resumeId}}/match/{{jdId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resumes",
+                "{{resumeId}}",
+                "match",
+                "{{jdId}}"
+              ]
+            },
+            "description": "Embeds both sides (skipping any chunk whose content is unchanged since the last call — free on a re-run), then returns a calibrated 0-100 semantic score per requirement plus a keyword coverage report. The resume must be `parsed` and the job description `analyzed` first.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/{{resumeId}}/match/{{jdId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "{{resumeId}}",
+                    "match",
+                    "{{jdId}}"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"semanticScore\": 28,\n    \"perRequirement\": [\n      {\n        \"requirement\": \"5+ years of experience with Node.js\",\n        \"importance\": \"required\",\n        \"rawSimilarity\": 0.5424,\n        \"score\": 48,\n        \"evidence\": \"Professional summary: Dynamic Full Stack Web Developer with over 7 years...\",\n        \"foundIn\": \"Summary\",\n        \"verdict\": \"partial\"\n      }\n    ],\n    \"keywords\": [\n      {\n        \"keyword\": \"Node.js\",\n        \"canonical\": \"node.js\",\n        \"category\": \"language\",\n        \"importance\": \"required\",\n        \"status\": \"matched\",\n        \"foundIn\": [\n          \"skills\"\n        ],\n        \"source\": \"exact\"\n      }\n    ],\n    \"stats\": {\n      \"resume\": {\n        \"embedded\": 0,\n        \"reused\": 8\n      },\n      \"jd\": {\n        \"embedded\": 11,\n        \"reused\": 0\n      }\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-20T17:21:34.861Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Not Ready",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/resumes/{{resumeId}}/match/{{jdId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "resumes",
+                    "{{resumeId}}",
+                    "match",
+                    "{{jdId}}"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"JD_NOT_ANALYZED\",\n    \"message\": \"This job description is not ready to match against (status: pending).\",\n    \"details\": {\n      \"status\": \"pending\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-20T17:21:34.861Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Auth / Sessions",
       "item": [
         {
@@ -2614,6 +3003,11 @@
     },
     {
       "key": "resumeId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "jdId",
       "value": "",
       "type": "string"
     }

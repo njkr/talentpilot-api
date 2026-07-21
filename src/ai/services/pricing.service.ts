@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { getModelSpec } from '../model-catalog';
+import { getEmbeddingModelSpec, getModelSpec } from '../model-catalog';
 
 export interface UsageInput {
   model: string;
@@ -26,5 +26,17 @@ export class PricingService {
       (completionTokens / 1_000_000) * pricing.completionPerM;
 
     return cost.toFixed(6);
+  }
+
+  /** Embeddings have no completion/cached split — just input tokens at a flat rate. */
+  computeEmbeddingCostUsd({
+    model,
+    tokens,
+  }: {
+    model: string;
+    tokens: number;
+  }): string {
+    const { pricePerM } = getEmbeddingModelSpec(model);
+    return ((tokens / 1_000_000) * pricePerM).toFixed(6);
   }
 }

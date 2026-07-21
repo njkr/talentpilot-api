@@ -39,8 +39,10 @@ function buildService(overrides: { parse: jest.Mock }) {
     assertWithinBudget: jest.fn().mockResolvedValue(undefined),
     recordUsage: jest.fn().mockResolvedValue(undefined),
   } as any;
+  // None of these tests set truncateVariable, so the token counter is never consulted.
+  const tokenCounter = {} as any;
 
-  const service = new AiService(env, prompts, pricing, budget);
+  const service = new AiService(env, prompts, pricing, budget, tokenCounter);
   (service as any).client = {
     chat: { completions: { parse: overrides.parse } },
   };

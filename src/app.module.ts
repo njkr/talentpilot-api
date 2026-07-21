@@ -11,6 +11,8 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { AuditModule } from './audit/audit.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { ResumesModule } from './resumes/resumes.module';
+import { JobDescriptionsModule } from './job-descriptions/job-descriptions.module';
+import { AtsModule } from './ats/ats.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
@@ -44,6 +46,8 @@ import { dataSourceOptions } from './database/data-source';
     AuditModule,
     ProfilesModule,
     ResumesModule,
+    JobDescriptionsModule,
+    AtsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard }, // protected by default (§7)

@@ -71,6 +71,10 @@ export const ErrorCode = {
   AI_CONTEXT_TOO_LONG: 'AI_CONTEXT_TOO_LONG', // input exceeds the model's context window
   AI_CONTENT_FILTERED: 'AI_CONTENT_FILTERED', // provider refused the content
 
+  // job descriptions / matching
+  JD_TOO_SHORT: 'JD_TOO_SHORT', // pasted/uploaded text too short to be a real JD
+  JD_NOT_ANALYZED: 'JD_NOT_ANALYZED', // JD analysis hasn't finished (or failed) yet
+
   // platform
   RATE_LIMITED: 'RATE_LIMITED', // details: { retryAfterSec }
   INTERNAL_ERROR: 'INTERNAL_ERROR',
@@ -111,6 +115,8 @@ const STATUS: Record<string, number> = {
   AI_OUTPUT_INVALID: 502,
   AI_CONTEXT_TOO_LONG: 422,
   AI_CONTENT_FILTERED: 422,
+  JD_TOO_SHORT: 422,
+  JD_NOT_ANALYZED: 409,
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
 };
