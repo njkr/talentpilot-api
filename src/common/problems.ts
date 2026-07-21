@@ -185,4 +185,43 @@ export const Problems = {
       `This job description is not ready to match against (status: ${status}).`,
       { status },
     ),
+
+  // ── Sprint 5: pipeline & credits ────────────────────────────────────────────
+  analysisAlreadyRunning: (runId: string) =>
+    new AppException(
+      ErrorCode.ANALYSIS_ALREADY_RUNNING,
+      'This workspace already has an analysis running.',
+      { runId },
+    ),
+
+  idempotencyKeyRequired: () =>
+    new AppException(
+      ErrorCode.IDEMPOTENCY_KEY_REQUIRED,
+      'Send a unique Idempotency-Key header with this request.',
+    ),
+
+  insufficientCredits: (required: number, balance: number) =>
+    new AppException(
+      ErrorCode.INSUFFICIENT_CREDITS,
+      `This analysis needs ${required} credits; you have ${balance}.`,
+      { required, balance },
+    ),
+
+  runNotRetryable: (status: string) =>
+    new AppException(ErrorCode.RUN_NOT_RETRYABLE, `This run is ${status}.`, {
+      status,
+    }),
+
+  streamTicketInvalid: () =>
+    new AppException(
+      ErrorCode.STREAM_TICKET_INVALID,
+      'This stream link is invalid or has expired. Request a new one.',
+    ),
+
+  reportNotReady: (status: string) =>
+    new AppException(
+      ErrorCode.REPORT_NOT_READY,
+      `This workspace has no completed analysis yet (status: ${status}). Start or wait for a run to finish.`,
+      { status },
+    ),
 };

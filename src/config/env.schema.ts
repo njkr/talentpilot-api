@@ -54,6 +54,11 @@ export const envSchema = z.object({
   AI_USER_DAILY_BUDGET_USD: z.coerce.number().default(2),
   AI_GLOBAL_DAILY_BUDGET_USD: z.coerce.number().default(50),
   AI_KILL_SWITCH: z.stringbool().default(false), // flip to stop ALL AI instantly
+
+  // Credits — a minimal real ledger (Sprint 5), not a full billing system. New users
+  // get this many free credits on signup; a full analysis costs ANALYZE_CREDIT_COST
+  // (src/workspaces/workspaces.service.ts) of them.
+  SIGNUP_CREDIT_GRANT: z.coerce.number().default(100),
 });
 
 export type EnvType = z.infer<typeof envSchema>;

@@ -12,6 +12,11 @@ import { PromptTemplate } from '../prompts/entities/prompt-template.entity';
 import { TokenUsage } from '../ai/entities/token-usage.entity';
 import { JobDescription } from '../job-descriptions/entities/job-description.entity';
 import { Embedding } from '../embeddings/entities/embedding.entity';
+import { CreditLedger } from '../credits/entities/credit-ledger.entity';
+import { PipelineRun } from '../pipeline/entities/pipeline-run.entity';
+import { PipelineStep } from '../pipeline/entities/pipeline-step.entity';
+import { AtsReport } from '../ats/entities/ats-report.entity';
+import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
 
 // Single source of truth for the DB connection, shared by:
 //  - the Nest app (via TypeOrmModule.forRootAsync in app.module.ts)
@@ -35,6 +40,11 @@ export const dataSourceOptions: DataSourceOptions = {
     TokenUsage,
     JobDescription,
     Embedding,
+    CreditLedger,
+    PipelineRun,
+    PipelineStep,
+    AtsReport,
+    AtsKeywordMatch,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   synchronize: false, // migrations only — see Sprint 1 §2

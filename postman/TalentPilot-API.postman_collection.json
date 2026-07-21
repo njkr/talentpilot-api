@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "cd40433b-b434-486e-b73e-1e8a8b97422e",
-    "name": "TalentPilot API — Auth, Accounts, Profiles & Resumes (Sprints 1-4)",
-    "description": "## Response envelope\nEvery 2xx response is `{ success: true, data, meta }`. Every error is `{ success: false, error: { code, message, details?, fields? }, meta }` — `code` is one of the `ErrorCode` values in `common/exceptions/app.exception.ts` (e.g. `INVALID_CREDENTIALS`, `OTP_EXPIRED`, `TOKEN_SUPERSEDED`, `PLAN_LIMIT_REACHED`, `RESUME_IN_USE`). `meta` always carries `requestId` + `timestamp`; paginated list endpoints also put `nextCursor`/`hasMore` in `meta` (not top-level).\n\n## Auth model\n- **Access token**: short-lived JWT (`JWT_ACCESS_TTL`, default 15m). Sent as `Authorization: Bearer <token>` — the collection auto-fills this from the `accessToken` variable, which Register/Verify/Login/Refresh test scripts populate automatically.\n- **Refresh token**: opaque, rotating, lives in an httpOnly `tp_rt` cookie scoped to `/api/v1/auth`. Postman's cookie jar stores and resends it automatically like a browser — nothing to configure, just run requests in order within one Postman session.\n\n## Suggested run order (folders are already in this order top to bottom)\n1. **Register** → generates a fresh `{{email}}` each run\n2. **Verify Email** → fill `otpCode` from the email/logs first (see its description for the dev caveat)\n3. **Login** — alternative to step 2 if already verified; also works pre-verification\n4. **Refresh Token** → rotates the session\n5. **Get Me** / **Update Me**\n6. **Get Profile** / **Update Profile**\n7. **Upload Resume** (select a real PDF/DOCX in the `file` field) → captures `{{resumeId}}` → **List/Get/Rename/Download/Retry Resumes**\n7b. Once `status` reaches `parsed` (extraction + AI parsing both run automatically on the worker), **List Resume Sections** → **Update Resume Section** to view/edit the extracted fields\n8. **Paste Job Description** (or **Upload Job Description**) → captures `{{jdId}}`, analysed inline → **Score Resume Against Job Description** to match it against the resume from step 7 → **Delete Resume** / **Delete Job Description** last\n9. **List Sessions** / **Revoke Session** — do this *before* Logout, or the session you just revoked (Logout) won't be there to list\n10. **Forgot Password** → fill `resetToken`, then **Reset Password**\n11. **Logout** / **Delete Me** — destructive/terminal, kept last on purpose\n\n## Resumes notes\n- Upload requires a **verified** email and a free plan slot (max 3 resumes/user) — both surface as 403.\n- Parsing is two automatic stages on the separate **worker** process (`pnpm start:worker`): text extraction (`uploaded` → `extracting` → `extracted`), then AI structuring (`extracted` → `parsing` → `parsed`). If a resume sits at `uploaded` or `extracted` forever, the worker isn't running, not a bug.\n- AI structuring calls OpenAI (`OPENAI_API_KEY` required) and is metered/budget-capped (`AI_USER_DAILY_BUDGET_USD` / `AI_GLOBAL_DAILY_BUDGET_USD`) — a resume stuck at `parsing` with a 429/`AI_BUDGET_EXCEEDED` in `parseError` means the budget or kill switch, not a bug either.\n- **Sections** (`personal_info`, `summary`, `skills`, `experience`, `projects`, `education`, `certifications`, `languages`) only exist once `status` is `parsed`. Editing a section via **Update Resume Section** marks it `editedByUser: true` so it survives a future re-parse.\n\n## Job descriptions & matching notes\n- Job descriptions are analysed **inline** (not queued) — the paste/upload response already carries `status: analyzed` with parsed requirements and skills, typically within a few seconds.\n- Pasting/uploading text that normalizes to the same content hash for the same user returns the existing analysed row instead of paying for a second AI call.\n- **Score Resume Against Job Description** requires the resume to be `parsed` and the JD to be `analyzed` first — otherwise it 409s with `RESUME_NOT_PARSED` or `JD_NOT_ANALYZED`.\n- Re-running a match after editing neither side is free: embeddings are content-hashed per chunk, so unchanged chunks are reused (`stats.resume.reused` / `stats.jd.reused`) instead of re-embedded.\n- Storage is MinIO locally (`docker compose up -d minio`) — the same code talks to real AWS S3 or Cloudflare R2 in other environments.\n\nImport `TalentPilot-API.postman_environment.json` alongside this collection and select it as your active environment before running anything.",
+    "name": "TalentPilot API — Auth, Accounts, Profiles, Resumes & Pipeline (Sprints 1-6)",
+    "description": "## Response envelope\nEvery 2xx response is `{ success: true, data, meta }`. Every error is `{ success: false, error: { code, message, details?, fields? }, meta }` — `code` is one of the `ErrorCode` values in `common/exceptions/app.exception.ts` (e.g. `INVALID_CREDENTIALS`, `OTP_EXPIRED`, `TOKEN_SUPERSEDED`, `PLAN_LIMIT_REACHED`, `RESUME_IN_USE`, `INSUFFICIENT_CREDITS`). `meta` always carries `requestId` + `timestamp`; paginated list endpoints also put `nextCursor`/`hasMore` in `meta` (not top-level).\n\n## Auth model\n- **Access token**: short-lived JWT (`JWT_ACCESS_TTL`, default 15m). Sent as `Authorization: Bearer <token>` — the collection auto-fills this from the `accessToken` variable, which Register/Verify/Login/Refresh test scripts populate automatically.\n- **Refresh token**: opaque, rotating, lives in an httpOnly `tp_rt` cookie scoped to `/api/v1/auth`. Postman's cookie jar stores and resends it automatically like a browser — nothing to configure, just run requests in order within one Postman session.\n\n## Suggested run order (folders are already in this order top to bottom)\n1. **Register** → generates a fresh `{{email}}` each run, and grants `SIGNUP_CREDIT_GRANT` (100 by default) credits automatically\n2. **Verify Email** → fill `otpCode` from the email/logs first (see its description for the dev caveat)\n3. **Login** — alternative to step 2 if already verified; also works pre-verification\n4. **Refresh Token** → rotates the session\n5. **Get Me** / **Update Me**\n6. **Get Profile** / **Update Profile**\n7. **Upload Resume** (select a real PDF/DOCX in the `file` field) → captures `{{resumeId}}` → **List/Get/Rename/Download/Retry Resumes**\n7b. Once `status` reaches `parsed` (extraction + AI parsing both run automatically on the worker), **List Resume Sections** → **Update Resume Section** to view/edit the extracted fields\n8. **Paste Job Description** (or **Upload Job Description**) → captures `{{jdId}}`, analysed inline → **Score Resume Against Job Description** to match it against the resume from step 7 → **Delete Resume** / **Delete Job Description** last\n9. **Workspaces & Pipeline**: **Create Workspace** (pairs `{{resumeId}}` + `{{jdId}}`) → **Start Analysis** → **Mint Stream Ticket** + **Live Progress (SSE)** (or just poll **Get Run Status** until `status` is `completed`/`partial`) → **Get ATS Report** for the actual score → **Retry Run** if it failed/partial → **Delete Workspace** last\n10. **List Sessions** / **Revoke Session** — do this *before* Logout, or the session you just revoked (Logout) won't be there to list\n11. **Forgot Password** → fill `resetToken`, then **Reset Password**\n12. **Logout** / **Delete Me** — destructive/terminal, kept last on purpose\n\n## Resumes notes\n- Upload requires a **verified** email and a free plan slot (max 3 resumes/user) — both surface as 403.\n- Parsing is two automatic stages on the separate **worker** process (`pnpm start:worker`): text extraction (`uploaded` → `extracting` → `extracted`), then AI structuring (`extracted` → `parsing` → `parsed`). If a resume sits at `uploaded` or `extracted` forever, the worker isn't running, not a bug.\n- AI structuring calls OpenAI (`OPENAI_API_KEY` required) and is metered/budget-capped (`AI_USER_DAILY_BUDGET_USD` / `AI_GLOBAL_DAILY_BUDGET_USD`) — a resume stuck at `parsing` with a 429/`AI_BUDGET_EXCEEDED` in `parseError` means the budget or kill switch, not a bug either.\n- **Sections** (`personal_info`, `summary`, `skills`, `experience`, `projects`, `education`, `certifications`, `languages`) only exist once `status` is `parsed`. Editing a section via **Update Resume Section** marks it `editedByUser: true` so it survives a future re-parse.\n\n## Job descriptions & matching notes\n- Job descriptions are analysed **inline** (not queued) — the paste/upload response already carries `status: analyzed` with parsed requirements and skills, typically within a few seconds.\n- Pasting/uploading text that normalizes to the same content hash for the same user returns the existing analysed row instead of paying for a second AI call.\n- **Score Resume Against Job Description** requires the resume to be `parsed` and the JD to be `analyzed` first — otherwise it 409s with `RESUME_NOT_PARSED` or `JD_NOT_ANALYZED`.\n- Re-running a match after editing neither side is free: embeddings are content-hashed per chunk, so unchanged chunks are reused (`stats.resume.reused` / `stats.jd.reused`) instead of re-embedded.\n- Storage is MinIO locally (`docker compose up -d minio`) — the same code talks to real AWS S3 or Cloudflare R2 in other environments.\n\n## Workspaces & pipeline notes (Sprints 5-6)\n- A **workspace** pairs one resume with one job description. **Start Analysis** runs both through a 5-step pipeline on the **worker** process — `parse_resume → parse_jd → generate_embeddings → match_keywords → score_ats` — each step idempotent, so a crashed/retried run never redoes (or recharges for) completed work.\n- Costs a flat **10 credits**, debited atomically with creating the run; requires a unique `Idempotency-Key` header (use Postman's `{{$guid}}` dynamic variable) so a retried request replays the existing run instead of double-charging.\n- Only one active (`queued`/`running`) run per workspace — enforced by a database partial unique index, not just application logic, so it holds even under concurrent requests. A second **Start Analysis** call while one is active 409s `ANALYSIS_ALREADY_RUNNING`.\n- Progress is pushed live via SSE (**Mint Stream Ticket** then **Live Progress (SSE)**), or pollable via **Get Run Status** — both share the same state shape. A run that partially fails (`status: partial`) proportionally refunds credits for the steps that didn't complete; **Retry Run** re-runs only the failed/blocked steps for free.\n- The worker process (`pnpm start:worker`) must be running for any of this to progress past `queued` — same caveat as resume/JD parsing above.\n\nImport `TalentPilot-API.postman_environment.json` alongside this collection and select it as your active environment before running anything.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -2452,6 +2452,984 @@
       ]
     },
     {
+      "name": "Workspaces & Pipeline",
+      "item": [
+        {
+          "name": "Create Workspace",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set('workspaceId', json.data.id); pm.collectionVariables.set('workspaceId', json.data.id);",
+                  "  pm.test('Workspace id captured', () => pm.expect(json.data.id).to.be.a('string'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resumeId\": \"{{resumeId}}\",\n  \"jobDescriptionId\": \"{{jdId}}\",\n  \"name\": \"Acme Corp — Senior Backend Engineer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces"
+              ]
+            },
+            "description": "Pairs a resume with a job description so they can be run through the analysis pipeline together. `resumeId`/`jobDescriptionId` must both belong to the current user — a foreign or unknown id 404s (never 403). Doesn't require either side to be parsed/analyzed yet; that's only checked when you call **Start Analysis**.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"resumeId\": \"3836e6cc-e4fc-45c7-a8eb-eb1660da11ae\",\n  \"jobDescriptionId\": \"9c1e2f0a-8e3a-4b7a-9d3e-1a2b3c4d5e6f\",\n  \"name\": \"Acme Corp — Senior Backend Engineer\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{workspaceId}}\",\n    \"name\": \"Acme Corp — Senior Backend Engineer\",\n    \"resumeId\": \"{{resumeId}}\",\n    \"jobDescriptionId\": \"{{jdId}}\",\n    \"status\": \"created\",\n    \"lastRunId\": null,\n    \"analyzedResumeVersion\": null,\n    \"createdAt\": \"2026-07-21T09:10:02.551Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — resume/JD not owned",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"resumeId\": \"00000000-0000-0000-0000-000000000000\",\n  \"jobDescriptionId\": \"9c1e2f0a-8e3a-4b7a-9d3e-1a2b3c4d5e6f\",\n  \"name\": \"Acme Corp — Senior Backend Engineer\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"Resume not found.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Workspaces",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Cursor-paginated, newest first. Pass the previous page's `meta.nextCursor` as `?cursor=` to continue.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"{{workspaceId}}\",\n      \"name\": \"Acme Corp — Senior Backend Engineer\",\n      \"resumeId\": \"{{resumeId}}\",\n      \"jobDescriptionId\": \"{{jdId}}\",\n      \"status\": \"completed\",\n      \"lastRunId\": \"{{runId}}\",\n      \"analyzedResumeVersion\": 1,\n      \"createdAt\": \"2026-07-21T09:10:02.551Z\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\",\n    \"nextCursor\": null,\n    \"hasMore\": false\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Workspace",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{workspaceId}}\",\n    \"name\": \"Acme Corp — Senior Backend Engineer\",\n    \"resumeId\": \"{{resumeId}}\",\n    \"jobDescriptionId\": \"{{jdId}}\",\n    \"status\": \"created\",\n    \"lastRunId\": null,\n    \"analyzedResumeVersion\": null,\n    \"createdAt\": \"2026-07-21T09:10:02.551Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Start Analysis",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set('runId', json.data.runId); pm.collectionVariables.set('runId', json.data.runId);",
+                  "  pm.test('Run id captured', () => pm.expect(json.data.runId).to.be.a('string'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/analyze",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "analyze"
+              ]
+            },
+            "description": "Starts (or resumes) a full analysis run: parse resume → parse JD → generate embeddings → match keywords → score against ATS criteria. Requires a **verified** email and a unique `Idempotency-Key` header (Postman's `{{$guid}}` dynamic variable fills a fresh one each send — replaying the same key returns the same run instead of starting, and charging for, a second one). Debits 10 credits atomically with creating the run; every new account is granted `SIGNUP_CREDIT_GRANT` (100 by default) on registration, so a fresh account can run this ~10 times before topping up.\n\nOnly one active run per workspace at a time — a second call while one is `queued`/`running` 409s with `ANALYSIS_ALREADY_RUNNING` instead of racing it.\n\nAfter this returns, either open **Live Progress (SSE)** or poll **Get Run Status**.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "202 Accepted",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "d3b07384-d9a0-4b1e-8f7a-2c1e9a0b3c4d"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/analyze",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "analyze"
+                  ]
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"runId\": \"{{runId}}\",\n    \"status\": \"queued\",\n    \"creditsCharged\": 10,\n    \"replayed\": false\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request — missing Idempotency-Key",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/analyze",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "analyze"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"IDEMPOTENCY_KEY_REQUIRED\",\n    \"message\": \"Send a unique Idempotency-Key header with this request.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "402 Payment Required — insufficient credits",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "d3b07384-d9a0-4b1e-8f7a-2c1e9a0b3c4d"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/analyze",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "analyze"
+                  ]
+                }
+              },
+              "status": "Payment Required",
+              "code": 402,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"INSUFFICIENT_CREDITS\",\n    \"message\": \"This analysis needs 10 credits; you have 3.\",\n    \"details\": {\n      \"required\": 10,\n      \"balance\": 3\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — resume/JD not ready",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "d3b07384-d9a0-4b1e-8f7a-2c1e9a0b3c4d"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/analyze",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "analyze"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"RESUME_NOT_PARSED\",\n    \"message\": \"This resume is still being processed (status: extracted).\",\n    \"details\": {\n      \"status\": \"extracted\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — analysis already running",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "d3b07384-d9a0-4b1e-8f7a-2c1e9a0b3c4d"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/analyze",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "analyze"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"ANALYSIS_ALREADY_RUNNING\",\n    \"message\": \"This workspace already has an analysis running.\",\n    \"details\": {\n      \"runId\": \"{{runId}}\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Mint Stream Ticket",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  const json = pm.response.json();",
+                  "  pm.environment.set('streamTicket', json.data.ticket); pm.collectionVariables.set('streamTicket', json.data.ticket);",
+                  "  pm.test('Ticket captured', () => pm.expect(json.data.ticket).to.be.a('string'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/runs/{{runId}}/stream-ticket",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "runs",
+                "{{runId}}",
+                "stream-ticket"
+              ]
+            },
+            "description": "The browser's `EventSource` API can't send an `Authorization` header, so the stream endpoint below authenticates via a single-use, 60-second ticket instead of a Bearer token. Call this (authenticated normally) first, then open **Live Progress (SSE)** with the returned ticket before it expires.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/runs/{{runId}}/stream-ticket",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "runs",
+                    "{{runId}}",
+                    "stream-ticket"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"ticket\": \"{{streamTicket}}\",\n    \"expiresInSec\": 60\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Live Progress (SSE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/runs/{{runId}}/stream?ticket={{streamTicket}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "runs",
+                "{{runId}}",
+                "stream"
+              ],
+              "query": [
+                {
+                  "key": "ticket",
+                  "value": "{{streamTicket}}"
+                }
+              ]
+            },
+            "description": "Server-Sent Events — `text/event-stream`, not a normal JSON response, so this request is here for reference/documentation more than for Postman's response viewer (which buffers the whole thing rather than rendering it live). Auth is the single-use ticket from **Mint Stream Ticket** in the query string, not a Bearer token — this route is `@Public()`.\n\nAlways sends a `snapshot` event first (current state), so a client that connects after the run already finished still gets a useful response instead of waiting forever; then `run.started`/`step.*`/`run.completed`/`run.failed` events as they happen, plus a `ping` heartbeat every 15s. To watch it live outside Postman:\n\n```\ncurl -N \"{{baseUrl}}/workspaces/runs/{{runId}}/stream?ticket={{streamTicket}}\"\n```",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — text/event-stream",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/runs/{{runId}}/stream?ticket={{streamTicket}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "runs",
+                    "{{runId}}",
+                    "stream"
+                  ],
+                  "query": [
+                    {
+                      "key": "ticket",
+                      "value": "{{streamTicket}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream"
+                }
+              ],
+              "cookie": [],
+              "body": "event: message\ndata: {\"type\":\"snapshot\",\"data\":{\"runId\":\"{{runId}}\",\"status\":\"running\",\"progress\":45,\"steps\":[{\"name\":\"parse_resume\",\"status\":\"completed\"},{\"name\":\"parse_jd\",\"status\":\"completed\"},{\"name\":\"generate_embeddings\",\"status\":\"running\"},{\"name\":\"match_keywords\",\"status\":\"pending\"},{\"name\":\"score_ats\",\"status\":\"pending\"}]}}\n\nevent: message\ndata: {\"type\":\"run.completed\",\"data\":{\"runId\":\"{{runId}}\",\"progress\":100,\"creditsCharged\":10,\"creditsRefunded\":0}}\n\n"
+            },
+            {
+              "name": "401 Unauthorized — expired/invalid/already-consumed ticket",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/runs/{{runId}}/stream?ticket=expired",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "runs",
+                    "{{runId}}",
+                    "stream"
+                  ],
+                  "query": [
+                    {
+                      "key": "ticket",
+                      "value": "expired"
+                    }
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"STREAM_TICKET_INVALID\",\n    \"message\": \"This stream link is invalid or has expired. Request a new one.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Run Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/runs/{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "runs",
+                "{{runId}}"
+              ]
+            },
+            "description": "Polling fallback for clients that skip SSE — same state shape as the SSE `snapshot` event.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — completed",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/runs/{{runId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "runs",
+                    "{{runId}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{runId}}\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"status\": \"completed\",\n    \"progress\": 100,\n    \"currentStep\": null,\n    \"creditsCharged\": 10,\n    \"creditsRefunded\": 0,\n    \"error\": null,\n    \"steps\": [\n      { \"name\": \"parse_resume\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"parse_jd\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"generate_embeddings\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"match_keywords\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"score_ats\", \"status\": \"completed\", \"error\": null }\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "200 OK — partial (one optional step failed)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/runs/{{runId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "runs",
+                    "{{runId}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{runId}}\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"status\": \"partial\",\n    \"progress\": 75,\n    \"currentStep\": null,\n    \"creditsCharged\": 10,\n    \"creditsRefunded\": 3,\n    \"error\": null,\n    \"steps\": [\n      { \"name\": \"parse_resume\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"parse_jd\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"generate_embeddings\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"match_keywords\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"score_ats\", \"status\": \"failed\", \"error\": \"AI provider unavailable after 3 attempts\" }\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get ATS Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/report",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "report"
+              ]
+            },
+            "description": "The actual score — the output of the most recent completed `score_ats` step for this workspace: `overallScore`, the seven-component breakdown with the exact weight/contribution of each (so the UI can show its work, not just a bare number), AI-written strengths/weaknesses/recommendations, and the full keyword match list. Only meaningful once the workspace's `status` (from **Get Workspace** / **Get Run Status**) is `completed` or has a report despite being `partial` — otherwise 409s with `REPORT_NOT_READY`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/report",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "report"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"c3d4e5f6-1a2b-4c3d-9e8f-7a6b5c4d3e2f\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"runId\": \"{{runId}}\",\n    \"overallScore\": 72,\n    \"keywordScore\": 91,\n    \"semanticScore\": 28,\n    \"experienceScore\": 70,\n    \"educationScore\": 60,\n    \"projectScore\": 80,\n    \"formatScore\": 90,\n    \"grammarScore\": 90,\n    \"scoreBreakdown\": [\n      { \"component\": \"keyword\", \"score\": 91, \"weight\": 0.3, \"contribution\": 27.3 },\n      { \"component\": \"semantic\", \"score\": 28, \"weight\": 0.2, \"contribution\": 5.6 },\n      { \"component\": \"experience\", \"score\": 70, \"weight\": 0.15, \"contribution\": 10.5 },\n      { \"component\": \"education\", \"score\": 60, \"weight\": 0.1, \"contribution\": 6.0 },\n      { \"component\": \"project\", \"score\": 80, \"weight\": 0.1, \"contribution\": 8.0 },\n      { \"component\": \"format\", \"score\": 90, \"weight\": 0.1, \"contribution\": 9.0 },\n      { \"component\": \"grammar\", \"score\": 90, \"weight\": 0.05, \"contribution\": 4.5 }\n    ],\n    \"summary\": \"Solid backend candidate with strong keyword coverage but limited direct evidence of the specific Node.js/TypeScript stack requested.\",\n    \"strengths\": [\n      \"7+ years of full-stack experience, exceeding the 5-year requirement\",\n      \"Direct PostgreSQL experience called out explicitly\"\n    ],\n    \"weaknesses\": [\n      \"No explicit mention of Kubernetes or container orchestration\"\n    ],\n    \"recommendations\": [\n      \"Add a bullet quantifying an achievement with Node.js specifically\"\n    ],\n    \"keywords\": [\n      {\n        \"keyword\": \"Node.js\",\n        \"canonical\": \"node.js\",\n        \"category\": \"language\",\n        \"importance\": \"required\",\n        \"status\": \"matched\",\n        \"evidence\": \"Skills: Node.js, Express, TypeScript\",\n        \"foundIn\": [\"skills\"],\n        \"suggestion\": null\n      },\n      {\n        \"keyword\": \"Kubernetes\",\n        \"canonical\": \"kubernetes\",\n        \"category\": \"tool\",\n        \"importance\": \"preferred\",\n        \"status\": \"missing\",\n        \"evidence\": null,\n        \"foundIn\": [],\n        \"suggestion\": \"Mention any container orchestration experience, even informal\"\n      }\n    ],\n    \"createdAt\": \"2026-07-21T09:12:40.918Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:55.201Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — no completed analysis yet",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/report",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "report"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"REPORT_NOT_READY\",\n    \"message\": \"This workspace has no completed analysis yet (status: queued). Start or wait for a run to finish.\",\n    \"details\": {\n      \"status\": \"queued\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:55.201Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Retry Run",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/runs/{{runId}}/retry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "runs",
+                "{{runId}}",
+                "retry"
+              ]
+            },
+            "description": "Only valid for a `failed` or `partial` run — completed steps are skipped (StepRunner is idempotent), so this only re-does the work that actually failed, and does **not** re-charge credits.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/runs/{{runId}}/retry",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "runs",
+                    "{{runId}}",
+                    "retry"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{runId}}\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"status\": \"queued\",\n    \"progress\": 75,\n    \"currentStep\": null,\n    \"creditsCharged\": 10,\n    \"creditsRefunded\": 0,\n    \"error\": null,\n    \"steps\": [\n      { \"name\": \"parse_resume\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"parse_jd\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"generate_embeddings\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"match_keywords\", \"status\": \"completed\", \"error\": null },\n      { \"name\": \"score_ats\", \"status\": \"pending\", \"error\": null }\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — not retryable",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/runs/{{runId}}/retry",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "runs",
+                    "{{runId}}",
+                    "retry"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"RUN_NOT_RETRYABLE\",\n    \"message\": \"This run is completed.\",\n    \"details\": {\n      \"status\": \"completed\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Workspace",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}"
+              ]
+            },
+            "description": "Soft delete — kept last in this folder since it's destructive/terminal, same convention as Delete Resume/Delete Job Description.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Auth / Sessions",
       "item": [
         {
@@ -3008,6 +3986,21 @@
     },
     {
       "key": "jdId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "workspaceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "runId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "streamTicket",
       "value": "",
       "type": "string"
     }

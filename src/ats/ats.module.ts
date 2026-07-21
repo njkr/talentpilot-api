@@ -5,15 +5,20 @@ import { ResumesModule } from '../resumes/resumes.module';
 import { JobDescriptionsModule } from '../job-descriptions/job-descriptions.module';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
 import { AiModule } from '../ai/ai.module';
+import { AtsReport } from './entities/ats-report.entity';
+import { AtsKeywordMatch } from './entities/ats-keyword-match.entity';
 import { SemanticScorerService } from './services/semantic-scorer.service';
 import { KeywordMatcherService } from './services/keyword-matcher.service';
+import { FormatScorerService } from './services/format-scorer.service';
+import { KeywordScorerService } from './services/keyword-scorer.service';
+import { AtsService } from './ats.service';
 import { MatchingFacade } from './matching.facade';
 import { MatchingService } from './matching.service';
 import { MatchingController } from './matching.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ResumeSection]),
+    TypeOrmModule.forFeature([ResumeSection, AtsReport, AtsKeywordMatch]),
     ResumesModule,
     JobDescriptionsModule,
     EmbeddingsModule,
@@ -23,8 +28,14 @@ import { MatchingController } from './matching.controller';
   providers: [
     SemanticScorerService,
     KeywordMatcherService,
+    FormatScorerService,
+    KeywordScorerService,
+    AtsService,
     MatchingFacade,
     MatchingService,
   ],
+  // Exported for the pipeline's MatchKeywordsStep/ScoreAtsStep (worker-side), which
+  // reuse these directly rather than going through MatchingFacade's bundled embed+match.
+  exports: [SemanticScorerService, KeywordMatcherService, AtsService],
 })
 export class AtsModule {}
