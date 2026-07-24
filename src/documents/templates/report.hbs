@@ -1,0 +1,71 @@
+{{> _base}}
+<h1>{{workspaceName}}</h1>
+<p class="muted">{{position}}{{#if company}} at {{company}}{{/if}}</p>
+
+{{#if atsReport}}
+<h2>ATS Compatibility Score</h2>
+<div class="score">{{atsReport.overallScore}}<span style="font-size:14pt">/100</span></div>
+<table style="width:100%;border-collapse:collapse;margin:10px 0;">
+  {{#each atsReport.scoreBreakdown}}
+  <tr>
+    <td style="padding:3px 0;text-transform:capitalize;">{{this.component}}</td>
+    <td style="padding:3px 0;text-align:right;">{{this.score}}/100</td>
+    <td style="padding:3px 0;text-align:right;color:#666;">weight {{this.weight}}</td>
+  </tr>
+  {{/each}}
+</table>
+<p>{{atsReport.summary}}</p>
+
+{{#if atsReport.strengths.length}}
+<h2>Strengths</h2>
+<ul>{{#each atsReport.strengths}}<li>{{this}}</li>{{/each}}</ul>
+{{/if}}
+{{#if atsReport.weaknesses.length}}
+<h2>Areas to Improve</h2>
+<ul>{{#each atsReport.weaknesses}}<li>{{this}}</li>{{/each}}</ul>
+{{/if}}
+{{/if}}
+
+{{#if suggestions.length}}
+<h2>Suggested Improvements</h2>
+{{#each suggestions}}
+  <p><span class="badge">{{this.impact}}</span> {{this.reason}}</p>
+{{/each}}
+{{/if}}
+
+{{#if coverLetter}}
+<h2>Cover Letter</h2>
+{{#each coverLetter.paragraphs}}<p>{{this}}</p>{{/each}}
+{{/if}}
+
+{{#if interviewQuestions.length}}
+<h2>Interview Preparation</h2>
+{{#each interviewQuestions}}
+  <p><strong>{{this.question}}</strong><br/>
+  <span class="muted">{{this.type}} &middot; {{this.difficulty}} &mdash; {{this.whyAsked}}</span></p>
+{{/each}}
+{{/if}}
+
+{{#if companyInsight}}
+<h2>Company Research</h2>
+<p>{{companyInsight.overview}} <span class="badge">confidence: {{companyInsight.confidence}}</span></p>
+{{#if companyInsight.talkingPoints.length}}
+<ul>{{#each companyInsight.talkingPoints}}<li>{{this}}</li>{{/each}}</ul>
+{{/if}}
+{{/if}}
+
+{{#if salaryEstimate}}
+<h2>Salary Estimate</h2>
+<p>{{salaryEstimate.currency}} {{salaryEstimate.p25}} &ndash; {{salaryEstimate.p75}}
+  (median {{salaryEstimate.p50}}) <span class="badge">estimate</span></p>
+<p class="muted">{{salaryEstimate.methodology}}</p>
+{{/if}}
+
+{{#if learningRoadmap.items.length}}
+<h2>Learning Roadmap</h2>
+<ul>
+  {{#each learningRoadmap.items}}
+    <li><strong>{{this.title}}</strong> ({{this.priority}}, ~{{this.estHours}}h) &mdash; {{this.gapReason}}</li>
+  {{/each}}
+</ul>
+{{/if}}

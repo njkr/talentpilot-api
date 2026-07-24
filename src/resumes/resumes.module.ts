@@ -14,7 +14,7 @@ import { ResumesService } from './resumes.service';
 import { SectionsService } from './services/sections.service';
 import { FileValidatorService } from './services/file-validator.service';
 import { TextExtractorService } from './services/text-extractor.service';
-import { PlanLimitService } from 'src/subscriptions/plan-limit.service';
+import { SubscriptionsModule } from 'src/subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -35,6 +35,7 @@ import { PlanLimitService } from 'src/subscriptions/plan-limit.service';
       }),
       inject: [Env],
     }),
+    SubscriptionsModule,
   ],
   controllers: [ResumesController, SectionsController],
   providers: [
@@ -42,7 +43,6 @@ import { PlanLimitService } from 'src/subscriptions/plan-limit.service';
     SectionsService,
     FileValidatorService,
     TextExtractorService,
-    PlanLimitService,
   ],
   // FileValidatorService/TextExtractorService are file-format concerns, not resume-
   // specific — JobDescriptionsModule reuses them for JD file uploads rather than

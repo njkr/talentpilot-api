@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Repository } from 'typeorm';
 import { PipelineRun, RunStatus } from './entities/pipeline-run.entity';
 // Aliased: the DB row and the step-contract abstract class are both legitimately named
@@ -15,7 +16,7 @@ import { PipelineContext, PipelineStep } from './steps/step.interface';
 import { ProgressBus } from './progress/progress.bus';
 import { ContextHydrator } from './context-hydrator.service';
 import { CreditService } from '../credits/credit.service';
-import { AppException } from '../common/exceptions/app.exception';
+import { AppException, ErrorCode } from '../common/exceptions/app.exception';
 import { TokenUsage } from '../ai/entities/token-usage.entity';
 
 // One step-level retry attempt is warranted for a transient provider outage — this is
@@ -43,6 +44,7 @@ export class StepRunner {
     private readonly bus: ProgressBus,
     private readonly credits: CreditService,
     private readonly hydrator: ContextHydrator,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async execute(runId: string): Promise<void> {
@@ -76,9 +78,21 @@ export class StepRunner {
 
     // Load already-completed steps from a previous attempt — this is what makes a
     // worker crash recoverable instead of a full restart.
+    //
+    // A prior 'skipped' row is only treated as resolved if it was a GENUINE skip
+    // (step.shouldSkip() said so). The "everything left is blocked" branch below also
+    // persists status 'skipped' (with error: 'dependency failed') for steps that never
+    // got a chance to run at all — e.g. finalize, blocked because generate_cover_letter
+    // failed on attempt 1. Counting that as permanently resolved meant a retry that
+    // fixed the blocking step (attempt 2, cover letter now succeeds) would STILL never
+    // re-attempt finalize: it was already "done" as far as this loader was concerned,
+    // so the run reported status 'completed' while finalize silently never ran and its
+    // consolidated summary was never produced.
     const prior = await this.stepRows.find({ where: { runId } });
     for (const p of prior) {
-      if (p.status === 'completed' || p.status === 'skipped') done.add(p.name);
+      if (p.status === 'completed') done.add(p.name);
+      if (p.status === 'skipped' && p.error !== 'dependency failed')
+        done.add(p.name);
     }
 
     // A dependency counts as "resolved" (safe to proceed past) if it either completed,
@@ -143,7 +157,10 @@ export class StepRunner {
 
     const skipReason = await step.shouldSkip(ctx);
     if (skipReason) {
-      await this.markStep(run.id, step.name, 'skipped');
+      await this.markStep(run.id, step.name, 'skipped', {
+        error: null,
+        errorType: null,
+      });
       this.bus.publish(run.id, {
         type: 'step.skipped',
         runId: run.id,
@@ -172,6 +189,11 @@ export class StepRunner {
           attempt,
           outputRef: result.outputRef,
           costUsd: await this.stepCost(run.id, step.name),
+          // upsert() only writes the columns given here — a retry that succeeds on a
+          // step which failed on a prior attempt would otherwise leave that attempt's
+          // error/errorType text sitting on an otherwise-'completed' row forever.
+          error: null,
+          errorType: null,
         });
         this.bus.publish(run.id, {
           type: 'step.completed',
@@ -265,8 +287,21 @@ export class StepRunner {
     // did NOT produce an artifact. Refunding nothing on failure invites chargebacks;
     // refunding everything means a run that produced 90% of the value is free.
     let refunded = 0;
+    let creditsRefunded = run.creditsRefunded ?? 0;
+    let refundedSteps = run.refundedSteps ?? [];
     if (status !== 'completed' && run.creditsCharged > 0) {
-      const lostWeight = [...failed].reduce(
+      // Refund ONLY steps that have never been refunded before on this run. A step
+      // that fails identically on every retry (a deterministic failure — e.g. this
+      // JD genuinely has no company name, so generate_cover_letter will keep failing
+      // the same way every time) must be refunded exactly ONCE, not once per retry.
+      // Without this guard, retrying a permanently-broken run manufactures credits:
+      // the same failed weight was being re-refunded and added to the running total
+      // on every single attempt, with nothing capping it at creditsCharged.
+      const alreadyRefunded = new Set(refundedSteps);
+      const newlyFailed = [...failed].filter(
+        (name) => !alreadyRefunded.has(name),
+      );
+      const lostWeight = newlyFailed.reduce(
         (n, name) => n + (this.registry.get(name)?.creditWeight ?? 0),
         0,
       );
@@ -276,7 +311,28 @@ export class StepRunner {
       refunded = Math.round(run.creditsCharged * (lostWeight / totalWeight));
       if (refunded > 0) {
         await this.credits.refund(run.userId, refunded, 'refund', run.id);
+        // Cumulative across every attempt of this run, NOT overwritten — a retry
+        // that fails a DIFFERENT step than the first attempt must not lose track of
+        // the earlier refund (see reverseRefund() below, which relies on this being
+        // the true lifetime total for the run, not just this round's amount). Hard
+        // capped at creditsCharged as a last-resort invariant: a refund can never
+        // exceed what was actually charged, no matter what the proportional math
+        // above computes.
+        creditsRefunded = Math.min(
+          run.creditsCharged,
+          (run.creditsRefunded ?? 0) + refunded,
+        );
+        refundedSteps = [...refundedSteps, ...newlyFailed];
       }
+    } else if (status === 'completed' && (run.creditsRefunded ?? 0) > 0) {
+      // ── Reversal ──
+      // A previous attempt on this exact run was proportionally refunded, then a
+      // retry went on to deliver the COMPLETE product. Without this, the user paid
+      // creditsCharged - creditsRefunded for something that cost the full
+      // creditsCharged — a real, ongoing revenue leak, not a cosmetic one.
+      await this.reverseRefund(run.userId, run.creditsRefunded ?? 0, run.id);
+      creditsRefunded = 0;
+      refundedSteps = [];
     }
 
     const cost = await this.stepRows
@@ -290,7 +346,8 @@ export class StepRunner {
       finishedAt: new Date(),
       progress: status === 'completed' ? 100 : run.progress,
       failedSteps: [...failed],
-      creditsRefunded: refunded,
+      creditsRefunded,
+      refundedSteps,
       totalCostUsd: cost?.c ?? '0',
       currentStep: null,
     });
@@ -312,6 +369,53 @@ export class StepRunner {
             refundedCredits: refunded,
           },
     );
+
+    // Separate from ProgressBus above: that's Redis pub/sub for live SSE progress
+    // (ephemeral, only reaches an open connection). This is an in-process domain event
+    // for anything that needs to react to run completion durably — right now,
+    // PipelineNotificationListener, which writes an in-app + email notification even if
+    // the user has no SSE connection open (e.g. they closed the tab and came back later).
+    this.eventEmitter.emit(
+      status === 'completed' ? 'run.completed' : 'run.failed',
+      {
+        runId,
+        userId: run.userId,
+        workspaceId: run.workspaceId,
+        status,
+        failedSteps: [...failed],
+      },
+    );
+  }
+
+  /**
+   * Reverses an earlier proportional refund once a retry on the same run has gone on
+   * to deliver the complete product. Tries a normal debit first; if the user's
+   * balance is no longer sufficient to "afford" it (they may have spent the refund
+   * elsewhere), forces it through anyway via a negative grant rather than silently
+   * skipping the reversal — the analysis was genuinely delivered in full, and letting
+   * the balance go negative is the correct outcome here, not leaving the run
+   * permanently under-billed.
+   */
+  private async reverseRefund(
+    userId: string,
+    amount: number,
+    runId: string,
+  ): Promise<void> {
+    try {
+      await this.credits.debit(userId, amount, 'retry_reversal', runId);
+    } catch (err) {
+      if (
+        err instanceof AppException &&
+        err.code === ErrorCode.INSUFFICIENT_CREDITS
+      ) {
+        await this.credits.grant(userId, -amount, 'retry_reversal', runId);
+        this.logger.warn(
+          `refund reversal for run ${runId} drove user ${userId}'s balance negative`,
+        );
+      } else {
+        throw err;
+      }
+    }
   }
 
   private async markStep(

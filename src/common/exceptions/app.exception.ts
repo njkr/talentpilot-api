@@ -77,6 +77,12 @@ export const ErrorCode = {
   JD_TOO_SHORT: 'JD_TOO_SHORT', // pasted/uploaded text too short to be a real JD
   JD_NOT_ANALYZED: 'JD_NOT_ANALYZED', // JD analysis hasn't finished (or failed) yet
 
+  // documents (Sprint 9)
+  DOCUMENT_NOT_READY: 'DOCUMENT_NOT_READY', // details: { status }
+
+  // payments (Sprint 10)
+  WEBHOOK_SIGNATURE_INVALID: 'WEBHOOK_SIGNATURE_INVALID',
+
   // platform
   RATE_LIMITED: 'RATE_LIMITED', // details: { retryAfterSec }
   INTERNAL_ERROR: 'INTERNAL_ERROR',
@@ -121,6 +127,8 @@ const STATUS: Record<string, number> = {
   AI_CONTENT_FILTERED: 422,
   JD_TOO_SHORT: 422,
   JD_NOT_ANALYZED: 409,
+  DOCUMENT_NOT_READY: 409,
+  WEBHOOK_SIGNATURE_INVALID: 400,
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
 };

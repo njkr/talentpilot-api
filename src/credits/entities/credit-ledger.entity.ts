@@ -12,7 +12,15 @@ export type CreditReason =
   | 'refund'
   | 'grant'
   | 'cover_letter_regenerate'
-  | 'answer_feedback';
+  | 'answer_feedback'
+  // ── Sprint 10: payments ──
+  | 'monthly_refill' // granted on invoice.payment_succeeded for a paid plan
+  | 'purchase' // one-off credit top-up (not plan-linked)
+  | 'admin_adjust' // manual correction via the admin panel (Sprint 11)
+  // A prior attempt on this run was proportionally refunded, then a retry delivered
+  // the complete product — this reverses that earlier refund. See
+  // StepRunner.finalise()/reverseRefund().
+  | 'retry_reversal';
 
 /**
  * An append-only ledger, not a mutable balance column. Balance is always
@@ -37,6 +45,13 @@ export class CreditLedger {
   // to the thing that caused it. Nullable: signup_bonus has no reference.
   @Column({ name: 'reference_id', type: 'uuid', nullable: true })
   referenceId: string | null;
+
+  // What kind of thing referenceId points at ('subscription', 'pipeline_run', ...).
+  // Nullable and purely descriptive — referenceId alone is enough to look the row up
+  // when the reason itself already implies the table (e.g. 'analyze' -> pipeline_runs).
+  @Column({ name: 'reference_type', nullable: true }) referenceType:
+    | string
+    | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

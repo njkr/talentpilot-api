@@ -5,25 +5,25 @@ import { RequirementMatch } from '../../embeddings/embeddings.service';
  * ⚠️ Raw cosine similarity is NOT a score. This is the single most misleading thing about
  * embeddings, and skipping this step makes the ATS number useless.
  *
- * Observed ranges for text-embedding-3-small on professional English text:
+ * Calibrated 2026-07-21 against 10 real resume/JD pairs on text-embedding-3-small with
+ * section-aware chunking. Observed ranges on THIS stack (requirement vs. best-matching
+ * resume chunk, not two arbitrary sentences):
  *
- *   0.20 – 0.35   unrelated (a JD requirement vs a random resume bullet)
- *   0.35 – 0.45   same domain, different thing ("React" vs "Vue")
- *   0.45 – 0.60   partial / related match
- *   0.60 – 0.75   good match
- *   0.75 – 0.90   near-identical phrasing
- *   > 0.90        essentially the same sentence
+ *   0.30 – 0.38   unrelated / weak
+ *   0.38 – 0.45   adjacent tech, same domain
+ *   0.45 – 0.52   partial match
+ *   0.52 – 0.58   strong match — the practical ceiling for a real requirement/bullet
+ *                 pair, NOT 0.80. A prior CEIL of 0.80 was essentially unreachable for
+ *                 this embedding model on this kind of short, requirement-vs-bullet
+ *                 text, which compressed every real candidate into a 20-50 band no
+ *                 matter how strong the actual match was.
+ *   > 0.60        near-identical phrasing (rare in practice)
  *
- * Two truly unrelated professional texts almost never score below 0.20, because they
- * share register, vocabulary, and structure. Mapping cosine → percentage directly gives
- * every candidate ~45%, and the score can't discriminate. Rescaling the USEFUL band to
- * 0-100 is what makes the number mean anything.
- *
- * These constants are calibration, not truth — see scripts/calibrate-semantic.ts.
- * Re-derive them from real data if the embedding model changes.
+ * These constants are calibration, not truth. RE-DERIVE THEM if you change the
+ * embedding model, the chunker, or how chunks are labelled/sectioned.
  */
-const FLOOR = 0.3; // at or below → 0
-const CEIL = 0.8; // at or above → 100
+const FLOOR = 0.32; // at or below → 0
+const CEIL = 0.62; // at or above → 100
 
 const IMPORTANCE_WEIGHT = {
   required: 3,

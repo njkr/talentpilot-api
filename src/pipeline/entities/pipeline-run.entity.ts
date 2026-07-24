@@ -55,6 +55,16 @@ export class PipelineRun {
   @Column({ name: 'failed_steps', type: 'jsonb', default: () => "'[]'" })
   failedSteps: string[];
 
+  // Names of every step EVER refunded across every attempt of this run — not just
+  // the current failed set. Without this, a step that fails identically on every
+  // retry (a deterministic failure, not a transient one) gets its credit weight
+  // refunded again on every single retry, since finalise() would otherwise recompute
+  // the refund from "currently failed steps" with no memory of what was already paid
+  // back. Cleared back to [] the moment the run reaches 'completed' (see
+  // StepRunner.finalise()'s reversal branch).
+  @Column({ name: 'refunded_steps', type: 'jsonb', default: () => "'[]'" })
+  refundedSteps: string[];
+
   @Column({ name: 'resume_version', type: 'int' }) resumeVersion: number;
 
   @Column({ name: 'queued_at', type: 'timestamptz', default: () => 'NOW()' })

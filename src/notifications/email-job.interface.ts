@@ -1,4 +1,8 @@
-export type EmailTemplate = 'verify-email' | 'reset-password';
+export type EmailTemplate =
+  | 'verify-email'
+  | 'reset-password'
+  | 'notification'
+  | 'payment-failed';
 
 export interface EmailJob {
   to: string;

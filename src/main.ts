@@ -1,6 +1,7 @@
 import { NestFactory, Reflector } from '@nestjs/core';
 import { ClassSerializerInterceptor, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import * as express from 'express';
 // require(), not `import cookieParser from 'cookie-parser'` — this project's
 // tsconfig has esModuleInterop off, so a default import silently resolves to
 // `undefined` at runtime (cookie-parser exports a bare function, no `.default`).
@@ -13,8 +14,20 @@ import { TransformInterceptor } from './common/decorators/raw-response.decorator
 import { Env } from './config/config.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // bodyParser:false — Nest's default global JSON body parser would consume and
+  // reserialize the request before Stripe's signature verification ever sees it,
+  // and `constructEvent` needs the EXACT bytes Stripe signed. Body parsing is wired
+  // back up manually below: raw bytes for the one webhook path, JSON for everything
+  // else.
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
   const env = app.get(Env);
+
+  app.use(
+    '/api/v1/payments/webhook',
+    express.raw({ type: 'application/json' }),
+  );
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
 
   // Refresh tokens travel in an httpOnly cookie (see AuthController) — without
   // this, req.cookies is always undefined and every refresh/logout call fails.

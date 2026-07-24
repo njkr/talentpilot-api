@@ -112,6 +112,35 @@ describe('CreditService', () => {
     });
   });
 
+  describe('history', () => {
+    it('returns the most recent rows for a user, cursor-paginated', async () => {
+      const rows = Array.from({ length: 21 }, (_, i) => ({
+        id: `ledger-${i}`,
+        createdAt: new Date(2024, 0, i + 1),
+        amount: 1,
+      }));
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(rows),
+      };
+      const repo = { createQueryBuilder: jest.fn().mockReturnValue(qb) };
+      const service = new CreditService(repo as any, {} as any);
+
+      const page = await service.history('user-1', { limit: 20 } as any);
+
+      expect(qb.where).toHaveBeenCalledWith('l.user_id = :userId', {
+        userId: 'user-1',
+      });
+      expect(page.data).toHaveLength(20);
+      expect(page.hasMore).toBe(true);
+      expect(page.nextCursor).not.toBeNull();
+    });
+  });
+
   describe('grant / refund', () => {
     it('grant always succeeds regardless of balance', async () => {
       const save = jest.fn((row) => Promise.resolve(row));

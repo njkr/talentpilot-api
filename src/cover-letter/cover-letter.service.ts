@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { GeneratedDocument } from '../documents/entities/generated-document.entity';
 import { AiService } from '../ai/ai.service';
 import { CoverLetterOutput } from '../ai/schemas/cover-letter.schema';
 import { CoverLetter } from './entities/cover-letter.entity';
@@ -13,6 +14,7 @@ import { ChunkerService } from '../embeddings/services/chunker.service';
 import { CreditService } from '../credits/credit.service';
 import { Problems } from '../common/problems';
 import { renderJdSummary } from '../job-descriptions/utils/render-jd.util';
+import { FabricationGuardService } from '../suggestions/services/fabrication-guard.service';
 
 const WORDS: Record<'short' | 'standard' | 'long', number> = {
   short: 180,
@@ -42,6 +44,7 @@ export class CoverLetterService {
     private readonly ai: AiService,
     private readonly chunker: ChunkerService,
     private readonly credits: CreditService,
+    private readonly guard: FabricationGuardService,
     @InjectRepository(CoverLetter)
     private readonly letters: Repository<CoverLetter>,
     @InjectRepository(CompanyInsight)
@@ -54,6 +57,8 @@ export class CoverLetterService {
     private readonly sections: Repository<ResumeSection>,
     @InjectRepository(JobDescription)
     private readonly jds: Repository<JobDescription>,
+    @InjectRepository(GeneratedDocument)
+    private readonly generatedDocuments: Repository<GeneratedDocument>,
   ) {}
 
   async generate(
@@ -97,23 +102,76 @@ export class CoverLetterService {
       throw Problems.aiOutputInvalid();
     }
 
+    // Fabrication check — the same guard the resume optimiser uses (Sprint 7). A
+    // cover letter confidently naming an employer, project, or credential the
+    // candidate never had is a worse failure mode than a placeholder: the candidate
+    // may not notice it before sending, and the consequence lands in an interview,
+    // not a code review. The JD's own target company AND its position/title are both
+    // explicitly allowed even though neither is ever IN the resume — rule 3 of this
+    // prompt explicitly tells the model to open by naming the role, so "Sr. Fullstack
+    // Developer" appearing in the letter is expected content, not a fabricated employer.
+    // Without allowing the title too, every letter that followed that instruction
+    // tripped extractCapitalisedPhrases() and got rejected as an "unrecognised
+    // organisation" — a real bug, not company-less-JD-specific.
+    const knownOrgs = this.guard.collectKnownOrgs(ctx.sections);
+    const check = this.guard.check(
+      out.content,
+      ctx.resume.rawText ?? '',
+      knownOrgs,
+      [ctx.jd.company ?? '', ctx.jd.position ?? ''],
+    );
+    if (!check.safe) {
+      throw Problems.aiOutputInvalid();
+    }
+
+    // Signature: appended in code, never left to the model. Two rounds of prompt
+    // tightening (see the cover_letter prompt's v2/v3 change notes) still couldn't
+    // stop gpt-4o from closing with a literal "[Your Name]" — its training prior
+    // for "how a cover letter ends" is stronger than an instruction not to. The
+    // resume's personal_info.fullName is deliberately excluded from resume_summary
+    // (ChunkerService skips it — contact info isn't a matching concern), so it was
+    // never available to the model anyway. Appending it ourselves removes the
+    // model's discretion over the one line that kept failing validation.
+    const fullName = (
+      ctx.sections.find((s) => s.sectionType === 'personal_info')?.content as
+        | { fullName?: string | null }
+        | undefined
+    )?.fullName;
+    const content =
+      out.content.trimEnd() +
+      '\n\nSincerely,' +
+      (fullName ? `\n${fullName}` : '');
+
     await this.letters.update(
       { workspaceId: ctx.workspaceId },
       { isCurrent: false },
     );
     const version = await this.nextVersion(ctx.workspaceId);
-    return this.letters.save(
+    const saved = await this.letters.save(
       this.letters.create({
         workspaceId: ctx.workspaceId,
         runId: ctx.runId,
         version,
         tone,
         length,
-        content: out.content,
-        wordCount: out.content.split(/\s+/).filter(Boolean).length,
+        content,
+        wordCount: content.split(/\s+/).filter(Boolean).length,
         isCurrent: true,
       }),
     );
+
+    // Any doc built off the previous letter (a downloaded cover letter, or a full
+    // report that embeds one) no longer reflects what's on record.
+    await this.generatedDocuments.update(
+      {
+        workspaceId: ctx.workspaceId,
+        status: 'ready',
+        type: In(['cover_letter_pdf', 'cover_letter_docx', 'full_report_pdf']),
+      },
+      { status: 'stale' },
+    );
+
+    return saved;
   }
 
   /**

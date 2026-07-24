@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
 import { createHash } from 'crypto';
 import { Resume } from '../resumes/entities/resume.entity';
 import { ResumeSection } from '../resumes/entities/resume-section.entity';
@@ -10,6 +10,7 @@ import {
   OptimizableSectionType,
 } from '../suggestions/entities/ai-suggestion.entity';
 import { Workspace } from '../workspaces/entities/workspace.entity';
+import { GeneratedDocument } from '../documents/entities/generated-document.entity';
 import {
   findSection,
   readSuggestionTarget,
@@ -36,6 +37,8 @@ export class ResumeVersionsService {
     private readonly suggestions: Repository<AiSuggestion>,
     @InjectRepository(Workspace)
     private readonly workspaces: Repository<Workspace>,
+    @InjectRepository(GeneratedDocument)
+    private readonly generatedDocuments: Repository<GeneratedDocument>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -206,6 +209,7 @@ export class ResumeVersionsService {
         }),
       );
       await m.update(Resume, resumeId, { currentVersion: nextVersion });
+      await this.markDocumentsStale(m, resumeId, nextVersion);
 
       return { version: nextVersion, applied, skipped };
     });
@@ -248,8 +252,36 @@ export class ResumeVersionsService {
         }),
       );
       await m.update(Resume, resumeId, { currentVersion: next });
+      await this.markDocumentsStale(m, resumeId, next);
       return { version: next };
     });
+  }
+
+  /**
+   * Any already-generated document built from an older resume version no longer
+   * reflects what's on record. The resume itself may be shared across multiple
+   * workspaces, so this looks up every workspace pointing at it rather than just the
+   * one the caller happened to be acting on.
+   */
+  private async markDocumentsStale(
+    m: EntityManager,
+    resumeId: string,
+    newVersion: number,
+  ): Promise<void> {
+    const workspaceIds = (
+      await m.find(Workspace, { where: { resumeId }, select: { id: true } })
+    ).map((w) => w.id);
+    if (!workspaceIds.length) return;
+
+    await m.update(
+      GeneratedDocument,
+      {
+        workspaceId: In(workspaceIds),
+        status: 'ready',
+        resumeVersion: LessThan(newVersion),
+      },
+      { status: 'stale' },
+    );
   }
 
   async diff(resumeId: string, userId: string, from: number, to: number) {

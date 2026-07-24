@@ -10,7 +10,6 @@ import {
 } from './entities/ai-suggestion.entity';
 import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
 import { AtsReport } from '../ats/entities/ats-report.entity';
-import { ResumeSection } from '../resumes/entities/resume-section.entity';
 import { PipelineContext } from '../pipeline/steps/step.interface';
 import { FabricationGuardService } from './services/fabrication-guard.service';
 import { renderJdSummary } from '../job-descriptions/utils/render-jd.util';
@@ -28,19 +27,6 @@ const IMPORTANCE_RANK: Record<string, number> = {
   preferred: 1,
   nice_to_have: 2,
 };
-
-interface ExperienceItemLike {
-  company: string | null;
-}
-interface EducationItemLike {
-  institution: string | null;
-}
-interface CertificationItemLike {
-  issuer: string | null;
-}
-interface ProjectItemLike {
-  name: string | null;
-}
 
 @Injectable()
 export class SuggestionsService {
@@ -88,7 +74,7 @@ export class SuggestionsService {
       stepName: 'optimize_resume',
     });
 
-    const knownOrgs = this.collectOrgs(ctx.sections);
+    const knownOrgs = this.guard.collectKnownOrgs(ctx.sections);
     const sourceText = ctx.resume.rawText ?? '';
     const accepted: Array<Partial<AiSuggestion>> = [];
     let dropped = 0;
@@ -149,31 +135,6 @@ export class SuggestionsService {
     }
     if (!accepted.length) return [];
     return this.suggestions.save(this.suggestions.create(accepted));
-  }
-
-  private collectOrgs(sections: ResumeSection[]): string[] {
-    const orgs: string[] = [];
-    for (const s of sections) {
-      if (s.sectionType === 'experience') {
-        orgs.push(
-          ...(s.content as ExperienceItemLike[]).map((e) => e.company ?? ''),
-        );
-      }
-      if (s.sectionType === 'education') {
-        orgs.push(
-          ...(s.content as EducationItemLike[]).map((e) => e.institution ?? ''),
-        );
-      }
-      if (s.sectionType === 'certifications') {
-        orgs.push(
-          ...(s.content as CertificationItemLike[]).map((c) => c.issuer ?? ''),
-        );
-      }
-      if (s.sectionType === 'projects') {
-        orgs.push(...(s.content as ProjectItemLike[]).map((p) => p.name ?? ''));
-      }
-    }
-    return orgs.filter(Boolean);
   }
 
   private loose(s: string): string {

@@ -10,6 +10,11 @@ import { Workspace } from '../workspaces/entities/workspace.entity';
 import { PipelineContext } from '../pipeline/steps/step.interface';
 import { renderJdSummary } from '../job-descriptions/utils/render-jd.util';
 
+// required before preferred — NOT trusted to the model's own output order (the prompt
+// asks for this, but nothing before this fix verified it; the same reasoning that
+// keeps ATS scoring and keyword matching out of the model's hands entirely).
+const PRIORITY_RANK: Record<string, number> = { required: 0, preferred: 1 };
+
 @Injectable()
 export class LearningRoadmapService {
   constructor(
@@ -50,9 +55,18 @@ export class LearningRoadmapService {
       stepName: 'build_learning_path',
     });
 
+    // Ordering is enforced in code, not trusted to the model (the prompt asks for
+    // required-before-preferred, but a model's own output order is never verified
+    // elsewhere in this codebase either). Array.prototype.sort is stable, so items of
+    // equal priority keep the model's relative order.
     // Cap enforced in code too — a stray model output over the limit must not silently
     // ship a 20-item "homework list" (see the schema's own .max(6), belt and braces).
-    const items = out.items.slice(0, 6);
+    const items = [...out.items]
+      .sort(
+        (a, b) =>
+          (PRIORITY_RANK[a.priority] ?? 99) - (PRIORITY_RANK[b.priority] ?? 99),
+      )
+      .slice(0, 6);
 
     return this.roadmaps.save(
       this.roadmaps.create({

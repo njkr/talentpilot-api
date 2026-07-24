@@ -25,6 +25,12 @@ import { LearningRoadmap } from '../learning-roadmap/entities/learning-roadmap.e
 import { CompanyResearchCache } from '../company/entities/company-research-cache.entity';
 import { CompanyInsight } from '../company/entities/company-insight.entity';
 import { SalaryEstimate } from '../salary/entities/salary-estimate.entity';
+import { GeneratedDocument } from '../documents/entities/generated-document.entity';
+import { Notification } from '../notifications/entities/notification.entity';
+import { NotificationPreference } from '../notifications/entities/notification-preference.entity';
+import { Plan } from '../payments/entities/plan.entity';
+import { Subscription } from '../payments/entities/subscription.entity';
+import { WebhookEvent } from '../payments/entities/webhook-event.entity';
 
 // Single source of truth for the DB connection, shared by:
 //  - the Nest app (via TypeOrmModule.forRootAsync in app.module.ts)
@@ -61,6 +67,12 @@ export const dataSourceOptions: DataSourceOptions = {
     CompanyResearchCache,
     CompanyInsight,
     SalaryEstimate,
+    GeneratedDocument,
+    Notification,
+    NotificationPreference,
+    Plan,
+    Subscription,
+    WebhookEvent,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   synchronize: false, // migrations only — see Sprint 1 §2

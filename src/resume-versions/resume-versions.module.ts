@@ -5,6 +5,7 @@ import { ResumeSection } from '../resumes/entities/resume-section.entity';
 import { ResumeVersion } from './entities/resume-version.entity';
 import { AiSuggestion } from '../suggestions/entities/ai-suggestion.entity';
 import { Workspace } from '../workspaces/entities/workspace.entity';
+import { GeneratedDocument } from '../documents/entities/generated-document.entity';
 import { ResumeVersionsService } from './resume-versions.service';
 import { ResumeVersionsController } from './resume-versions.controller';
 import { SuggestionsController } from './suggestions.controller';
@@ -21,6 +22,7 @@ import { SuggestionsController } from './suggestions.controller';
       ResumeVersion,
       AiSuggestion,
       Workspace,
+      GeneratedDocument,
     ]),
   ],
   controllers: [ResumeVersionsController, SuggestionsController],

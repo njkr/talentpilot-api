@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { CreditLedger, CreditReason } from './entities/credit-ledger.entity';
 import { Problems } from '../common/problems';
+import { CursorQueryDto } from '../common/dto/cursor-query.dto';
+import { decodeCursor, encodeCursor } from '../common/utils/cursor.util';
 
 @Injectable()
 export class CreditService {
@@ -22,6 +24,36 @@ export class CreditService {
     return Number(row?.total ?? 0);
   }
 
+  /**
+   * The ledger's whole selling point is auditability ("why does this user have 47
+   * credits" is always answerable) — this exposes that directly to the user, cursor-
+   * paginated, newest first.
+   */
+  async history(userId: string, q: CursorQueryDto) {
+    const after = decodeCursor(q.cursor);
+    const qb = this.ledger
+      .createQueryBuilder('l')
+      .where('l.user_id = :userId', { userId })
+      .orderBy('l.created_at', 'DESC')
+      .addOrderBy('l.id', 'DESC')
+      .take(q.limit + 1);
+    if (after) {
+      qb.andWhere('(l.created_at, l.id) < (:c, :i)', {
+        c: after.createdAt,
+        i: after.id,
+      });
+    }
+
+    const rows = await qb.getMany();
+    const hasMore = rows.length > q.limit;
+    const data = hasMore ? rows.slice(0, q.limit) : rows;
+    return {
+      data,
+      hasMore,
+      nextCursor: hasMore ? encodeCursor(data.at(-1)!) : null,
+    };
+  }
+
   /** Always succeeds — used for signup bonuses and refunds, never blocked by balance. */
   grant(
     userId: string,
@@ -29,10 +61,17 @@ export class CreditService {
     reason: CreditReason,
     referenceId?: string,
     manager?: EntityManager,
+    referenceType?: string,
   ): Promise<CreditLedger> {
     const repo = manager ? manager.getRepository(CreditLedger) : this.ledger;
     return repo.save(
-      repo.create({ userId, amount, reason, referenceId: referenceId ?? null }),
+      repo.create({
+        userId,
+        amount,
+        reason,
+        referenceId: referenceId ?? null,
+        referenceType: referenceType ?? null,
+      }),
     );
   }
 

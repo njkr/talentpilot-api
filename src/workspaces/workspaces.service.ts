@@ -10,6 +10,7 @@ import { STEP_COUNT } from '../pipeline/steps/step-manifest';
 import { ResumesService } from '../resumes/resumes.service';
 import { JobDescriptionsService } from '../job-descriptions/job-descriptions.service';
 import { CreditService } from '../credits/credit.service';
+import { PlanLimitService } from '../subscriptions/plan-limit.service';
 import { Problems } from '../common/problems';
 import { CursorQueryDto } from '../common/dto/cursor-query.dto';
 import { decodeCursor, encodeCursor } from '../common/utils/cursor.util';
@@ -17,6 +18,14 @@ import { AtsReport } from '../ats/entities/ats-report.entity';
 import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
 
 // Sum of every step's creditWeight in STEP_MANIFEST (Sprints 5-8) — keep in sync.
+//
+// Deliberately a FLAT fee, charged once regardless of how many steps a retry
+// ultimately skips (e.g. re-analysing an unchanged resume/JD pair skips
+// parse_resume/parse_jd, weight 3 of 21, but is still charged the full 21). This is
+// an intentional policy, not a bug: "analyze" is priced as one action, and a partial
+// discount for internal step reuse would need its own product decision (a skipped
+// step isn't "refunded work" the way a genuinely FAILED step is — see
+// StepRunner.finalise()'s proportional refund, which only ever applies to failures).
 const ANALYZE_CREDIT_COST = 21;
 const ONE_ACTIVE_RUN_CONSTRAINT = 'one_active_run_per_workspace';
 
@@ -37,6 +46,7 @@ export class WorkspacesService {
     private readonly resumesService: ResumesService,
     private readonly jdsService: JobDescriptionsService,
     private readonly credits: CreditService,
+    private readonly planLimits: PlanLimitService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -46,6 +56,8 @@ export class WorkspacesService {
     jobDescriptionId: string,
     name: string,
   ) {
+    await this.planLimits.assertCanCreateWorkspace(userId);
+
     // Ownership check on both sides — a foreign resume/JD id 404s here rather than
     // surfacing as a confusing FK violation on insert.
     await this.resumesService.findOwned(resumeId, userId);

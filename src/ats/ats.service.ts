@@ -54,6 +54,16 @@ export class AtsService {
     const format = this.formatScorer.score(ctx.resume, ctx.sections);
     const semantic = matchData.semantic.semanticScore;
 
+    // Whether an education requirement exists at all is a computable binary — decided
+    // here in code from the JD's own parsed requirements, not left to the model's own
+    // null/non-null judgement (which the prompt asks for, but a model under no
+    // pressure to be right about a null can still invent a plausible-looking number).
+    // Same reasoning that already keeps keyword/semantic scoring out of the model's
+    // hands entirely.
+    const jdHasEducationRequirement =
+      ctx.jd.parsedData?.requirements.some((r) => r.category === 'education') ??
+      false;
+
     const { data: graded } = await this.ai.complete<AtsGrading>({
       feature: 'ats_grading',
       promptKey: 'ats_grading',
@@ -89,9 +99,13 @@ export class AtsService {
       {
         component: 'education',
         // null = the JD has no education requirement — excluded below, NOT zeroed
-        // (which would cap everyone at 90) and NOT scored 100 (free points).
-        score:
-          graded.educationScore === null ? null : clamp(graded.educationScore),
+        // (which would cap everyone at 90) and NOT scored 100 (free points). The
+        // decision of whether to score at all is forced by jdHasEducationRequirement,
+        // not by the model's own null; a model returning a number for a JD with no
+        // education requirement can no longer hand out 10 free points.
+        score: jdHasEducationRequirement
+          ? clamp(graded.educationScore ?? 50)
+          : null,
         weight: WEIGHTS.education,
       },
       {
@@ -134,8 +148,9 @@ export class AtsService {
         keywordScore: keyword.score,
         semanticScore: semantic,
         experienceScore: clamp(graded.experienceScore),
-        educationScore:
-          graded.educationScore === null ? null : clamp(graded.educationScore),
+        educationScore: jdHasEducationRequirement
+          ? clamp(graded.educationScore ?? 50)
+          : null,
         projectScore: clamp(graded.projectScore),
         formatScore: format.score,
         grammarScore: clamp(graded.grammarScore),

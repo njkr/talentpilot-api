@@ -83,7 +83,12 @@ function build(steps: any[]) {
     })),
   };
   const bus = { publish: jest.fn() };
-  const credits = { refund: jest.fn().mockResolvedValue(undefined) };
+  const credits = {
+    refund: jest.fn().mockResolvedValue(undefined),
+    debit: jest.fn().mockResolvedValue(undefined),
+    grant: jest.fn().mockResolvedValue(undefined),
+  };
+  const eventEmitter = { emit: jest.fn() };
   const hydrator = {
     hydrate: jest.fn().mockResolvedValue({
       runId: 'run-1',
@@ -106,9 +111,10 @@ function build(steps: any[]) {
     bus as any,
     credits as any,
     hydrator as any,
+    eventEmitter as any,
   );
 
-  return { runner, runRepo, stepRepo, workspaces, bus, credits };
+  return { runner, runRepo, stepRepo, workspaces, bus, credits, eventEmitter };
 }
 
 function allSteps(overrides: Record<string, Partial<any>> = {}) {
@@ -177,6 +183,78 @@ describe('StepRunner.execute', () => {
     ).toHaveBeenCalledTimes(1);
   });
 
+  it('re-attempts a step that was skipped for a blocked dependency on a prior attempt, once the retry resolves that dependency (the reported bug)', async () => {
+    const steps = allSteps();
+    const { runner, runRepo, stepRepo } = build(steps);
+    // Simulate what attempt 1 left behind: generate_cover_letter failed, so finalize
+    // (which depends on it) was never run — only recorded 'skipped' with the
+    // "dependency failed" marker, never actually executed.
+    for (const name of [
+      'parse_resume',
+      'parse_jd',
+      'generate_embeddings',
+      'estimate_salary',
+      'generate_interview_qs',
+      'match_keywords',
+      'score_ats',
+      'optimize_resume',
+      'build_learning_path',
+      'research_company',
+    ]) {
+      stepRepo.seed(name, 'completed');
+    }
+    stepRepo.seed('generate_cover_letter', 'failed');
+    stepRepo.rows.set('finalize', {
+      runId: 'run-1',
+      name: 'finalize',
+      status: 'skipped',
+      error: 'dependency failed',
+    });
+    runRepo.get().status = 'failed'; // as retry() would have left it before re-queueing
+
+    await runner.execute('run-1');
+
+    // generate_cover_letter's mock succeeds by default this attempt — finalize's only
+    // blocking dependency is now resolved, so finalize must actually run, not be
+    // treated as already "done" from the stale skip.
+    expect(steps.find((s) => s.name === 'finalize')!.run).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(runRepo.get().status).toBe('completed');
+  });
+
+  it("clears a step's stale error/errorType when a retry succeeds where a prior attempt failed", async () => {
+    const steps = allSteps();
+    const { runner, stepRepo } = build(steps);
+    stepRepo.rows.set('generate_cover_letter', {
+      runId: 'run-1',
+      name: 'generate_cover_letter',
+      status: 'failed',
+      error:
+        'The AI produced an invalid result and could not complete this request.',
+      errorType: 'AI_OUTPUT_INVALID',
+    });
+
+    await runner.execute('run-1'); // succeeds by default this attempt
+
+    const row = stepRepo.rows.get('generate_cover_letter');
+    expect(row.status).toBe('completed');
+    expect(row.error).toBeNull();
+    expect(row.errorType).toBeNull();
+  });
+
+  it('does NOT re-run a step that was genuinely skipped (shouldSkip() said so) on a prior attempt', async () => {
+    const steps = allSteps();
+    const { runner, stepRepo } = build(steps);
+    stepRepo.seed('research_company', 'skipped'); // no error field — a real shouldSkip() skip
+
+    await runner.execute('run-1');
+
+    expect(
+      steps.find((s) => s.name === 'research_company')!.shouldSkip,
+    ).not.toHaveBeenCalled();
+  });
+
   it('returns immediately without touching anything if the run is already completed', async () => {
     const steps = allSteps();
     const { runner, runRepo, stepRepo } = build(steps);
@@ -217,6 +295,116 @@ describe('StepRunner.execute', () => {
     expect(
       steps.find((s) => s.name === 'generate_interview_qs')!.run,
     ).toHaveBeenCalledTimes(1);
+  });
+
+  it('reverses a prior refund when a retried run goes on to complete fully', async () => {
+    const steps = allSteps();
+    const { runner, runRepo, credits } = build(steps);
+    // Simulate what a prior failed attempt on this exact run left behind: it was
+    // proportionally refunded 6 credits.
+    await runRepo.update('run-1', { creditsRefunded: 6 });
+
+    await runner.execute('run-1');
+
+    expect(runRepo.get().status).toBe('completed');
+    expect(credits.debit).toHaveBeenCalledWith(
+      'user-1',
+      6,
+      'retry_reversal',
+      'run-1',
+    );
+    expect(credits.grant).not.toHaveBeenCalled();
+    // The reversal is complete — nothing left owed on this run.
+    expect(runRepo.get().creditsRefunded).toBe(0);
+  });
+
+  it('forces the reversal through as a negative grant when the balance is now insufficient', async () => {
+    const steps = allSteps();
+    const { runner, runRepo, credits } = build(steps);
+    await runRepo.update('run-1', { creditsRefunded: 6 });
+    credits.debit.mockRejectedValueOnce(
+      new AppException(ErrorCode.INSUFFICIENT_CREDITS, 'not enough'),
+    );
+
+    await runner.execute('run-1');
+
+    // The completed run must not be blocked by the user having since spent the
+    // refunded credits elsewhere — the analysis was genuinely delivered in full.
+    expect(runRepo.get().status).toBe('completed');
+    expect(credits.grant).toHaveBeenCalledWith(
+      'user-1',
+      -6,
+      'retry_reversal',
+      'run-1',
+    );
+    expect(runRepo.get().creditsRefunded).toBe(0);
+  });
+
+  it('accumulates creditsRefunded across attempts rather than overwriting it', async () => {
+    const failing = new AppException(ErrorCode.AI_OUTPUT_INVALID, 'boom');
+    const steps = allSteps({
+      score_ats: { run: jest.fn().mockRejectedValue(failing) },
+    });
+    const { runner, runRepo } = build(steps);
+    // A previous, DIFFERENT attempt on this run already refunded 3 credits for a
+    // step that has since started succeeding — this round's own refund (for
+    // score_ats failing) must add to that, not replace it.
+    await runRepo.update('run-1', {
+      creditsRefunded: 3,
+      refundedSteps: ['some_other_step'],
+    });
+
+    await runner.execute('run-1');
+
+    expect(runRepo.get().creditsRefunded).toBeGreaterThan(3);
+  });
+
+  it('does NOT re-refund a step that fails IDENTICALLY on every retry (the reported bug)', async () => {
+    // A deterministic failure — e.g. a JD with no company name will make
+    // generate_cover_letter fail the exact same way on every single attempt.
+    // Refunding its credit weight again on every retry, with nothing tracking what
+    // was already paid back, lets a permanently-broken run mint unlimited credits.
+    const failing = new AppException(ErrorCode.AI_OUTPUT_INVALID, 'boom'); // not retryable
+    const steps = allSteps({
+      match_keywords: { run: jest.fn().mockRejectedValue(failing) },
+    });
+    const { runner, runRepo, credits } = build(steps);
+    // Simulate what a FIRST attempt already correctly refunded: match_keywords and
+    // everything it blocks (score_ats, optimize_resume, generate_cover_letter,
+    // build_learning_path, finalize — weight 13 of 21, charged 10 -> refund 6).
+    await runRepo.update('run-1', {
+      creditsRefunded: 6,
+      refundedSteps: [
+        'match_keywords',
+        'score_ats',
+        'optimize_resume',
+        'generate_cover_letter',
+        'build_learning_path',
+        'finalize',
+      ],
+    });
+
+    await runner.execute('run-1'); // a retry — the SAME steps fail again, identically
+
+    expect(credits.refund).not.toHaveBeenCalled();
+    expect(runRepo.get().creditsRefunded).toBe(6); // unchanged, not 12
+  });
+
+  it('never lets creditsRefunded exceed creditsCharged, no matter what the proportional math computes', async () => {
+    const failing = new AppException(ErrorCode.AI_OUTPUT_INVALID, 'boom');
+    const steps = allSteps({
+      match_keywords: { run: jest.fn().mockRejectedValue(failing) },
+    });
+    const { runner, runRepo } = build(steps);
+    // An already-corrupted prior state (as if from the pre-fix bug) — refunded is
+    // already suspiciously close to charged.
+    await runRepo.update('run-1', { creditsRefunded: 9, refundedSteps: [] });
+
+    await runner.execute('run-1');
+
+    expect(runRepo.get().creditsRefunded).toBeLessThanOrEqual(
+      runRepo.get().creditsCharged,
+    );
   });
 
   it('retries a step once on a retryable provider error, then succeeds', async () => {

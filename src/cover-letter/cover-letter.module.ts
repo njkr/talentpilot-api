@@ -6,11 +6,13 @@ import { Workspace } from '../workspaces/entities/workspace.entity';
 import { Resume } from '../resumes/entities/resume.entity';
 import { ResumeSection } from '../resumes/entities/resume-section.entity';
 import { JobDescription } from '../job-descriptions/entities/job-description.entity';
+import { GeneratedDocument } from '../documents/entities/generated-document.entity';
 import { CoverLetterService } from './cover-letter.service';
 import { CoverLetterController } from './cover-letter.controller';
 import { AiModule } from '../ai/ai.module';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
 import { CreditsModule } from '../credits/credits.module';
+import { FabricationGuardService } from '../suggestions/services/fabrication-guard.service';
 
 /**
  * Dual-use, like AtsModule: imported directly by PipelineWorkerModule (for
@@ -27,13 +29,18 @@ import { CreditsModule } from '../credits/credits.module';
       Resume,
       ResumeSection,
       JobDescription,
+      GeneratedDocument,
     ]),
     AiModule,
     EmbeddingsModule,
     CreditsModule,
   ],
   controllers: [CoverLetterController],
-  providers: [CoverLetterService],
+  // FabricationGuardService is a stateless, dependency-free utility (see
+  // suggestions/services/fabrication-guard.service.ts) — instantiated here directly
+  // rather than importing SuggestionsModule (worker-only, and importing it here would
+  // pull in the resume-optimisation AI graph this module has no business depending on).
+  providers: [CoverLetterService, FabricationGuardService],
   exports: [CoverLetterService],
 })
 export class CoverLetterModule {}

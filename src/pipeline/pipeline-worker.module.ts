@@ -24,9 +24,11 @@ import { InterviewModule } from '../interview/interview.module';
 import { LearningRoadmapModule } from '../learning-roadmap/learning-roadmap.module';
 import { CompanyModule } from '../company/company.module';
 import { SalaryModule } from '../salary/salary.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { ResumeParserService } from '../resumes/services/resume-parser.service';
 import { ContextHydrator } from './context-hydrator.service';
 import { StepRunner } from './step-runner.service';
+import { PipelineNotificationListener } from './pipeline-notification.listener';
 import { StepRegistry } from './steps/step.registry';
 import { ParseResumeStep } from './steps/parse-resume.step';
 import { ParseJdStep } from './steps/parse-jd.step';
@@ -87,6 +89,10 @@ import { FinalizeStep } from './steps/finalize.step';
     LearningRoadmapModule,
     CompanyModule,
     SalaryModule,
+    // Already imported into WorkerModule directly (owns the `emails` queue), but a
+    // module's imports aren't transitively visible — PipelineNotificationListener needs
+    // NotificationsService in its own DI scope.
+    NotificationsModule,
   ],
   providers: [
     // Not exported from ResumesModule's own providers list — this module owns its own
@@ -108,6 +114,7 @@ import { FinalizeStep } from './steps/finalize.step';
     StepRegistry,
     ContextHydrator,
     StepRunner,
+    PipelineNotificationListener,
   ],
   exports: [StepRunner],
 })

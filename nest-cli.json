@@ -4,7 +4,14 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "deleteOutDir": true,
-    "plugins": ["@nestjs/swagger"]
+    "plugins": ["@nestjs/swagger"],
+    "assets": [
+      {
+        "include": "documents/templates/**/*.hbs",
+        "outDir": "dist",
+        "watchAssets": true
+      }
+    ]
   },
   "schematics": {
     "*.ts": {

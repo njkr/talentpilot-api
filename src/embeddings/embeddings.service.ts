@@ -132,6 +132,11 @@ export class EmbeddingsService {
         SELECT r.content, r.metadata, r.embedding <=> jd.embedding AS distance
         FROM embeddings r
         WHERE r.owner_type = 'resume' AND r.owner_id = $1 AND r.version = $2
+          -- The summary is a restatement of the WHOLE resume, not evidence for any one
+          -- requirement — ten keywords packed into 40 words beats one keyword in a
+          -- 20-word bullet on cosine similarity every time, so it would otherwise win
+          -- every match and the user sees the same sentence quoted for every requirement.
+          AND r.metadata->>'sectionType' <> 'summary'
         ORDER BY r.embedding <=> jd.embedding
         LIMIT 1
       ) best

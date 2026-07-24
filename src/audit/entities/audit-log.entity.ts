@@ -23,6 +23,10 @@ export class AuditLog {
   @Column({ type: 'varchar' }) action: string;
 
   @Column({ name: 'resource_type', type: 'varchar' }) resourceType: string;
+  // Which row of resourceType this action was about (a run id, a document id, ...).
+  // Nullable — plenty of actions (login, logout) have no single resource to point at.
+  @Column({ name: 'resource_id', type: 'uuid', nullable: true })
+  resourceId: string | null;
 
   @Column({ type: 'inet', nullable: true }) ip: string | null;
   @Column({ name: 'user_agent', nullable: true }) userAgent: string | null;

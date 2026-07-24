@@ -3,6 +3,7 @@ import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { BullModule } from '@nestjs/bullmq';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ConfigModule, Env } from './config/config.module';
 import { AuthModule } from './auth/auth.module';
@@ -21,6 +22,12 @@ import { InterviewModule } from './interview/interview.module';
 import { LearningRoadmapModule } from './learning-roadmap/learning-roadmap.module';
 import { CompanyModule } from './company/company.module';
 import { SalaryModule } from './salary/salary.module';
+import { DocumentsModule } from './documents/documents.module';
+import { PaymentsModule } from './payments/payments.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { AdminModule } from './admin/admin.module';
+import { GdprModule } from './gdpr/gdpr.module';
+import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
@@ -47,6 +54,7 @@ import { dataSourceOptions } from './database/data-source';
     }),
 
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]), // global default; @Throttle overrides
+    ScheduleModule.forRoot(), // enables @Cron() — PaymentsService.reconcileAll
 
     AuthModule,
     UsersModule,
@@ -64,6 +72,12 @@ import { dataSourceOptions } from './database/data-source';
     LearningRoadmapModule,
     CompanyModule,
     SalaryModule,
+    DocumentsModule,
+    PaymentsModule,
+    DashboardModule,
+    AdminModule,
+    GdprModule,
+    HealthModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard }, // protected by default (§7)

@@ -41,6 +41,27 @@ const templates: Record<
       `.trim(),
     };
   },
+  notification: (vars) => {
+    const title = escapeHtml(String(vars.title));
+    const message = escapeHtml(String(vars.message));
+    return {
+      subject: title,
+      html: `
+        <p style="font-weight:700">${title}</p>
+        <p>${message}</p>
+      `.trim(),
+    };
+  },
+  'payment-failed': (vars) => {
+    const url = escapeHtml(String(vars.url));
+    return {
+      subject: 'We could not process your TalentPilot payment',
+      html: `
+        <p>Your most recent payment did not go through, so your subscription is now past due.</p>
+        <p><a href="${url}">Update your payment method</a> to keep your plan active.</p>
+      `.trim(),
+    };
+  },
 };
 
 export const renderTemplate = (

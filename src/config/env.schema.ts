@@ -65,6 +65,28 @@ export const envSchema = z.object({
   // results. Both steps are optional (required: false), so an invalid/missing key
   // degrades to a `partial` run rather than failing the whole analysis.
   TAVILY_API_KEY: z.string().startsWith('tvly-'),
+
+  // Documents (Sprint 9). Only set in the containerized worker image, which installs
+  // the system Chromium package and skips Puppeteer's own download (see
+  // Dockerfile.worker) — left unset, Puppeteer falls back to the Chromium it
+  // downloaded for itself at `npm install` time, which is what local dev uses.
+  PUPPETEER_EXECUTABLE_PATH: z.string().optional(),
+
+  // Payments (Sprint 10). Get real test-mode keys at https://dashboard.stripe.com/test/apikeys —
+  // with a placeholder key, checkout/webhook calls fail cleanly with a Stripe auth error
+  // rather than the process failing to boot.
+  STRIPE_SECRET_KEY: z.string().startsWith('sk_'),
+  STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_'),
+  // Price ids for the paid plans, seeded onto the `plans` table by its migration.
+  // Optional: a plan with no price id simply can't be checked out yet (NOT_FOUND on
+  // /payments/checkout), rather than the whole process failing to boot over it.
+  STRIPE_PRICE_PRO: z.string().optional(),
+  STRIPE_PRICE_ULTIMATE: z.string().optional(),
+
+  // Admin (Sprint 11). Role=admin alone is not enough to unlock /admin — a bug in role
+  // assignment, or a compromised admin account, would otherwise open everything. An
+  // env-controlled allowlist means an attacker must also be on a list only ops controls.
+  ADMIN_ALLOWED_EMAILS: z.string().default(''),
 });
 
 export type EnvType = z.infer<typeof envSchema>;

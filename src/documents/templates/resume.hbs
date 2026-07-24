@@ -1,0 +1,59 @@
+{{> _base}}
+<h1>{{fullName}}</h1>
+<div class="contact">
+  {{#if email}}{{email}}{{/if}}
+  {{#if phone}} &middot; {{phone}}{{/if}}
+  {{#if location}} &middot; {{location}}{{/if}}
+  {{#each links}} &middot; {{this.url}}{{/each}}
+</div>
+
+{{#if summary}}
+<h2>Professional Summary</h2>
+<p>{{summary}}</p>
+{{/if}}
+
+{{#if skills.length}}
+<h2>Skills</h2>
+<p>{{join skills ', '}}</p>
+{{/if}}
+
+{{#if experience.length}}
+<h2>Experience</h2>
+{{#each experience}}
+  <div class="entry-header">
+    <span>{{this.title}}{{#if this.company}}, {{this.company}}{{/if}}</span>
+    <span class="entry-dates">{{dateRange this.startDate this.endDate this.isCurrent}}</span>
+  </div>
+  <ul>
+    {{#each this.highlights}}<li>{{this}}</li>{{/each}}
+  </ul>
+{{/each}}
+{{/if}}
+
+{{#if projects.length}}
+<h2>Projects</h2>
+{{#each projects}}
+  <div class="entry-header"><span>{{this.name}}</span></div>
+  {{#if this.description}}<p>{{this.description}}</p>{{/if}}
+  {{#if this.technologies.length}}<p class="muted">Technologies: {{join this.technologies ', '}}</p>{{/if}}
+{{/each}}
+{{/if}}
+
+{{#if education.length}}
+<h2>Education</h2>
+{{#each education}}
+  <div class="entry-header">
+    <span>{{this.degree}}{{#if this.field}} in {{this.field}}{{/if}} — {{this.institution}}</span>
+    <span class="entry-dates">{{dateRange this.startDate this.endDate false}}</span>
+  </div>
+{{/each}}
+{{/if}}
+
+{{#if certifications.length}}
+<h2>Certifications</h2>
+<ul>
+  {{#each certifications}}
+    <li>{{this.name}}{{#if this.issuer}} — {{this.issuer}}{{/if}}{{#if this.date}} ({{this.date}}){{/if}}</li>
+  {{/each}}
+</ul>
+{{/if}}

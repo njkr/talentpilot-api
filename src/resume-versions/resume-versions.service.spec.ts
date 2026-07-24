@@ -91,6 +91,7 @@ function build() {
   const versions = { find: jest.fn() };
   const suggestions = { find: jest.fn(), update: jest.fn() };
   const workspaces = { findOne: jest.fn() };
+  const generatedDocuments = {};
   const dataSource = { transaction: jest.fn() };
 
   const service = new ResumeVersionsService(
@@ -99,6 +100,7 @@ function build() {
     versions as any,
     suggestions as any,
     workspaces as any,
+    generatedDocuments as any,
     dataSource as any,
   );
   return {

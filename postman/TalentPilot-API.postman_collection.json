@@ -1,7 +1,7 @@
 {
   "info": {
     "_postman_id": "cd40433b-b434-486e-b73e-1e8a8b97422e",
-    "name": "TalentPilot API — Auth, Accounts, Profiles, Resumes & Pipeline (Sprints 1-8)",
+    "name": "TalentPilot API — Auth, Accounts, Profiles, Resumes, Pipeline, Documents, Payments & Ops (Sprints 1-11)",
     "description": "## Response envelope\nEvery 2xx response is `{ success: true, data, meta }`. Every error is `{ success: false, error: { code, message, details?, fields? }, meta }` — `code` is one of the `ErrorCode` values in `common/exceptions/app.exception.ts` (e.g. `INVALID_CREDENTIALS`, `OTP_EXPIRED`, `TOKEN_SUPERSEDED`, `PLAN_LIMIT_REACHED`, `RESUME_IN_USE`, `INSUFFICIENT_CREDITS`). `meta` always carries `requestId` + `timestamp`; paginated list endpoints also put `nextCursor`/`hasMore` in `meta` (not top-level).\n\n## Auth model\n- **Access token**: short-lived JWT (`JWT_ACCESS_TTL`, default 15m). Sent as `Authorization: Bearer <token>` — the collection auto-fills this from the `accessToken` variable, which Register/Verify/Login/Refresh test scripts populate automatically.\n- **Refresh token**: opaque, rotating, lives in an httpOnly `tp_rt` cookie scoped to `/api/v1/auth`. Postman's cookie jar stores and resends it automatically like a browser — nothing to configure, just run requests in order within one Postman session.\n\n## Suggested run order (folders are already in this order top to bottom)\n1. **Register** → generates a fresh `{{email}}` each run, and grants `SIGNUP_CREDIT_GRANT` (100 by default) credits automatically\n2. **Verify Email** → fill `otpCode` from the email/logs first (see its description for the dev caveat)\n3. **Login** — alternative to step 2 if already verified; also works pre-verification\n4. **Refresh Token** → rotates the session\n5. **Get Me** / **Update Me**\n6. **Get Profile** / **Update Profile**\n7. **Upload Resume** (select a real PDF/DOCX in the `file` field) → captures `{{resumeId}}` → **List/Get/Rename/Download/Retry Resumes**\n7b. Once `status` reaches `parsed` (extraction + AI parsing both run automatically on the worker), **List Resume Sections** → **Update Resume Section** to view/edit the extracted fields\n8. **Paste Job Description** (or **Upload Job Description**) → captures `{{jdId}}`, analysed inline → **Score Resume Against Job Description** to match it against the resume from step 7 → **Delete Resume** / **Delete Job Description** last\n9. **Workspaces & Pipeline**: **Create Workspace** (pairs `{{resumeId}}` + `{{jdId}}`) → **Start Analysis** → **Mint Stream Ticket** + **Live Progress (SSE)** (or just poll **Get Run Status** until `status` is `completed`/`partial`) → **Get ATS Report** for the actual score → **Retry Run** if it failed/partial → **Delete Workspace** last\n10. Once the run is `completed`/`partial`, everything below reads from the SAME `{{workspaceId}}`/`{{resumeId}}` — no new setup needed: **Suggestions & Resume Versions** (list → apply/reject → diff/restore) → **Cover Letter** (get current, or regenerate for 2 credits) → **Interview Prep** (list questions → submit a practice answer for 1 credit) → **Company, Salary & Learning Roadmap** (all three are read-only GETs)\n11. **List Sessions** / **Revoke Session** — do this *before* Logout, or the session you just revoked (Logout) won't be there to list\n12. **Forgot Password** → fill `resetToken`, then **Reset Password**\n13. **Logout** / **Delete Me** — destructive/terminal, kept last on purpose\n\n## Resumes notes\n- Upload requires a **verified** email and a free plan slot (max 3 resumes/user) — both surface as 403.\n- Parsing is two automatic stages on the separate **worker** process (`pnpm start:worker`): text extraction (`uploaded` → `extracting` → `extracted`), then AI structuring (`extracted` → `parsing` → `parsed`). If a resume sits at `uploaded` or `extracted` forever, the worker isn't running, not a bug.\n- AI structuring calls OpenAI (`OPENAI_API_KEY` required) and is metered/budget-capped (`AI_USER_DAILY_BUDGET_USD` / `AI_GLOBAL_DAILY_BUDGET_USD`) — a resume stuck at `parsing` with a 429/`AI_BUDGET_EXCEEDED` in `parseError` means the budget or kill switch, not a bug either.\n- **Sections** (`personal_info`, `summary`, `skills`, `experience`, `projects`, `education`, `certifications`, `languages`) only exist once `status` is `parsed`. Editing a section via **Update Resume Section** marks it `editedByUser: true` so it survives a future re-parse.\n\n## Job descriptions & matching notes\n- Job descriptions are analysed **inline** (not queued) — the paste/upload response already carries `status: analyzed` with parsed requirements and skills, typically within a few seconds.\n- Pasting/uploading text that normalizes to the same content hash for the same user returns the existing analysed row instead of paying for a second AI call.\n- **Score Resume Against Job Description** requires the resume to be `parsed` and the JD to be `analyzed` first — otherwise it 409s with `RESUME_NOT_PARSED` or `JD_NOT_ANALYZED`.\n- Re-running a match after editing neither side is free: embeddings are content-hashed per chunk, so unchanged chunks are reused (`stats.resume.reused` / `stats.jd.reused`) instead of re-embedded.\n- Storage is MinIO locally (`docker compose up -d minio`) — the same code talks to real AWS S3 or Cloudflare R2 in other environments.\n\n## Workspaces & pipeline notes (Sprints 5-8)\n- A **workspace** pairs one resume with one job description. **Start Analysis** runs both through a 12-step DAG on the **worker** process:\n  ```\n  parse_resume ─┬─► generate_embeddings ─► match_keywords ─► score_ats ─┬─► optimize_resume ─► generate_cover_letter ─┐\n                │                                                       └─► build_learning_path ───────────────────┤\n  parse_jd ─────┼─► research_company     (optional)                                                                 ├─► finalize\n                ├─► estimate_salary      (optional)                                                                 │\n                └─► generate_interview_qs ───────────────────────────────────────────────────────────────────────────┘\n  ```\n  `research_company`/`estimate_salary`/`generate_interview_qs` don't need the ATS score, so they run CONCURRENTLY with the whole scoring branch — a full run finishes in roughly 45-90s, not the ~3min it would take serialised. Every step is idempotent, so a crashed/retried run never redoes (or recharges for) completed work.\n- Costs a flat **21 credits** (was 10 pre-Sprint-7), debited atomically with creating the run; requires a unique `Idempotency-Key` header (use Postman's `{{$guid}}` dynamic variable) so a retried request replays the existing run instead of double-charging.\n- Only one active (`queued`/`running`) run per workspace — enforced by a database partial unique index, not just application logic, so it holds even under concurrent requests. A second **Start Analysis** call while one is active 409s `ANALYSIS_ALREADY_RUNNING`.\n- `research_company` and `estimate_salary` are optional (`required: false`) — a dead Tavily key or a JD with no company name leaves the run `partial` with everything else intact, never `failed`. A failed optional step no longer blocks `finalize` (which depends on every step, optional ones included) from still running.\n- Progress is pushed live via SSE (**Mint Stream Ticket** then **Live Progress (SSE)**), or pollable via **Get Run Status** — both share the same state shape. A run that partially fails (`status: partial`) proportionally refunds credits for the steps that didn't complete; **Retry Run** re-runs only the failed/blocked steps for free.\n- The worker process (`pnpm start:worker`) must be running for any of this to progress past `queued` — same caveat as resume/JD parsing above.\n\n## Optimisation, cover letter & career-prep notes (Sprints 7-8)\n- **Suggestions** (from `optimize_resume`) go through a fabrication guard in code, not just prompt rules — invented metrics, years, employers/schools, and credentials are silently dropped before they ever reach **List Suggestions**. What you see has already passed verification.\n- **Apply Suggestions** batches every accepted suggestion into ONE new resume version (not one version per suggestion) and is free — already paid for by the run that generated them. If you hand-edit a bullet via the Sections API *after* a suggestion for it was generated, applying that suggestion is refused (`skipped`, marked `stale`) rather than silently overwriting your edit.\n- Resume history is append-only: **Restore Resume Version** copies an old version FORWARD as a new one — it never rewrites or deletes anything, so you can always get back to where you were. **Diff Resume Versions** is word-level, not character-level, so a one-word change doesn't read as unreadable noise.\n- **Cover Letter** is generated automatically by the run; **Regenerate Cover Letter** is a separate on-demand action (different tone/length) that costs 2 credits — but only on success: your balance is checked before the AI is even called, and the debit itself only happens after a clean result (no `[Company Name]`-style placeholders), so a rejected generation is never charged.\n- **Interview Prep** questions are grounded in this candidate's actual resume and this JD's actual requirements — `basedOn` names what prompted each one. **Submit Practice Answer** follows the same charge-only-on-success rule as cover letter regeneration: 1 credit, checked and debited around the AI call, never charged for a failure.\n- **Company Insight** is cached globally for 7 days per (normalised) company name — the 50th person who applies to the same company this week gets a free, already-computed answer (`fromCache: true`). `confidence: \"low\"` is an honest signal the company has little public information, not an error.\n- **Salary Estimate** is always a range (`p25`/`p50`/`p75`) with `isEstimate: true` baked into the entity itself — there is no code path that returns a bare number.\n- **Learning Roadmap** is capped at 6 items (enforced by the prompt AND in code) — a longer list reads as a guilt trip, not a plan.\n\nImport `TalentPilot-API.postman_environment.json` alongside this collection and select it as your active environment before running anything.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -5051,7 +5051,7 @@
                 "me"
               ]
             },
-            "description": "GDPR soft delete: blocks login immediately, revokes every session, sets `deletedAt`. The account is excluded from normal queries but kept for a 30-day grace window before a scheduled hard purge (a later sprint). **Destructive for this test user** — run it last.",
+            "description": "GDPR soft delete: blocks login immediately, revokes every session, sets `deletedAt`. The account is excluded from normal queries but kept for a 30-day grace window before a scheduled hard purge (see GdprService.purgeExpired, Sprint 11) that also cancels any active Stripe subscription and deletes S3 objects. **Destructive for this test user** — run it last.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -5091,6 +5091,1983 @@
               ],
               "cookie": [],
               "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-17T09:15:32.104Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Documents",
+      "item": [
+        {
+          "name": "Request Resume PDF",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "documents"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"resume_pdf\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Queues generation of a document. `type` is one of `resume_pdf` | `resume_docx` | `cover_letter_pdf` | `cover_letter_docx` | `full_report_pdf`. Rendering happens worker-side (Puppeteer for PDFs, the `docx` package for Word files) — poll **Get Document Status** until `status` is `ready`, then call **Download Document**. Every call creates a NEW row (never reuses an existing one), so the returned id is always this specific request's document.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "documents"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"type\": \"resume_pdf\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"9c3b1a2d-4e5f-4a6b-8c7d-1e2f3a4b5c6d\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"type\": \"resume_pdf\",\n    \"filename\": \"Resume - Acme — Backend Engineer.pdf\",\n    \"status\": \"queued\",\n    \"fileSize\": null,\n    \"error\": null,\n    \"createdAt\": \"2026-07-21T20:00:00.000Z\",\n    \"updatedAt\": \"2026-07-21T20:00:00.000Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  const json = pm.response.json();",
+                  "  const value = json?.data?.id;",
+                  "  if (value) {",
+                  "    pm.environment.set('documentId', value); pm.collectionVariables.set('documentId', value);",
+                  "    pm.test('documentId captured', () => pm.expect(value).to.be.a('string'));",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "documents"
+              ]
+            },
+            "description": "Every document ever generated for this workspace, newest first — including stale/failed ones, so the client can offer \"regenerate\".",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "documents"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"9c3b1a2d-4e5f-4a6b-8c7d-1e2f3a4b5c6d\",\n      \"workspaceId\": \"{{workspaceId}}\",\n      \"type\": \"resume_pdf\",\n      \"filename\": \"Resume - Acme — Backend Engineer.pdf\",\n      \"status\": \"ready\",\n      \"fileSize\": 48213,\n      \"error\": null,\n      \"createdAt\": \"2026-07-21T20:00:00.000Z\",\n      \"updatedAt\": \"2026-07-21T20:00:04.000Z\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Document Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents/{{documentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "documents",
+                "{{documentId}}"
+              ]
+            },
+            "description": "Poll this until `status` is `ready` (or `failed`) — generation is asynchronous.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — ready",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents/{{documentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "documents",
+                    "{{documentId}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{documentId}}\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"type\": \"resume_pdf\",\n    \"filename\": \"Resume - Acme — Backend Engineer.pdf\",\n    \"status\": \"ready\",\n    \"fileSize\": 48213,\n    \"error\": null,\n    \"createdAt\": \"2026-07-21T20:00:00.000Z\",\n    \"updatedAt\": \"2026-07-21T20:00:04.000Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Download Document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents/{{documentId}}/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "documents",
+                "{{documentId}}",
+                "download"
+              ]
+            },
+            "description": "A short-lived signed S3 URL (see `SIGNED_URL_TTL_SEC`) — the API never streams file bytes itself. 409s with `DOCUMENT_NOT_READY` if the document is still `queued`/`generating`, has gone `stale` (the resume/cover letter changed since it was built), or `failed`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents/{{documentId}}/download",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "documents",
+                    "{{documentId}}",
+                    "download"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"url\": \"https://s3.amazonaws.com/talentpilot-dev/users/.../Resume.pdf?X-Amz-Signature=...\",\n    \"filename\": \"Resume - Acme — Backend Engineer.pdf\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — not ready yet",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents/{{documentId}}/download",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "documents",
+                    "{{documentId}}",
+                    "download"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"DOCUMENT_NOT_READY\",\n    \"message\": \"This document is still generating. Try again shortly.\",\n    \"details\": {\n      \"status\": \"generating\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "List Notifications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications"
+              ]
+            },
+            "description": "Cursor-paginated, newest first. In-app notifications for run completion/failure, GDPR export readiness, etc.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/notifications",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "notifications"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d\",\n      \"type\": \"run.completed\",\n      \"title\": \"Your analysis is ready\",\n      \"message\": \"Your resume analysis finished — view your results now.\",\n      \"data\": {\n        \"runId\": \"{{runId}}\",\n        \"workspaceId\": \"{{workspaceId}}\",\n        \"status\": \"completed\"\n      },\n      \"readAt\": null,\n      \"createdAt\": \"2026-07-21T20:00:00.000Z\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\",\n    \"nextCursor\": null,\n    \"hasMore\": false\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Unread Count",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/unread-count",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "unread-count"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/notifications/unread-count",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "notifications",
+                    "unread-count"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": 3,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Mark Notification Read",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/{{notificationId}}/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "{{notificationId}}",
+                "read"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/notifications/{{notificationId}}/read",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "notifications",
+                    "{{notificationId}}",
+                    "read"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Mark All Read",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/read-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "read-all"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/notifications/read-all",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "notifications",
+                    "read-all"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Notification Preferences",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "preferences"
+              ]
+            },
+            "description": "Opt-OUT model: an empty list means every notification type still emails.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/notifications/preferences",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "notifications",
+                    "preferences"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    \"run.failed\"\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Notification Preferences",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "preferences"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emailDisabled\": [\n    \"run.completed\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Full replace, not merge — send the complete list of types to suppress emails for.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/notifications/preferences",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "notifications",
+                    "preferences"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"emailDisabled\": [\n    \"run.completed\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Create Checkout Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "Required. Replaying the same key returns the same Stripe Checkout session (via Stripe's own native idempotency, not a local table) instead of creating a second one — same pattern as POST /workspaces/:id/analyze. Postman's {{$guid}} dynamic variable mints a fresh one per send; keep it fixed to test the replay behavior."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/checkout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "checkout"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planKey\": \"pro\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`planKey` is `pro` or `ultimate` (never `free` — that plan needs no checkout). Redirect the browser to the returned `url`; Stripe Checkout handles card entry. 404s if that plan has no `stripe_price_id` configured yet for this environment (see `STRIPE_PRICE_PRO`/`STRIPE_PRICE_ULTIMATE`). Requires a unique `Idempotency-Key` header (see the header row above).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "{{$guid}}",
+                    "description": "Required. Replaying the same key returns the same Stripe Checkout session (via Stripe's own native idempotency, not a local table) instead of creating a second one — same pattern as POST /workspaces/:id/analyze. Postman's {{$guid}} dynamic variable mints a fresh one per send; keep it fixed to test the replay behavior."
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/checkout",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "checkout"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"planKey\": \"pro\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"url\": \"https://checkout.stripe.com/c/pay/cs_test_...\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — plan not purchasable in this environment",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "{{$guid}}",
+                    "description": "Required. Replaying the same key returns the same Stripe Checkout session (via Stripe's own native idempotency, not a local table) instead of creating a second one — same pattern as POST /workspaces/:id/analyze. Postman's {{$guid}} dynamic variable mints a fresh one per send; keep it fixed to test the replay behavior."
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/checkout",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "checkout"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"planKey\": \"pro\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"Plan \\\"pro\\\" is not available for checkout.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request — missing Idempotency-Key",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "{{$guid}}",
+                    "description": "Required. Replaying the same key returns the same Stripe Checkout session (via Stripe's own native idempotency, not a local table) instead of creating a second one — same pattern as POST /workspaces/:id/analyze. Postman's {{$guid}} dynamic variable mints a fresh one per send; keep it fixed to test the replay behavior."
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/checkout",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "checkout"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"IDEMPOTENCY_KEY_REQUIRED\",\n    \"message\": \"Send a unique Idempotency-Key header with this request.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-22T09:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Subscription",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payments/subscription",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "subscription"
+              ]
+            },
+            "description": "Always resolves — a user with no Subscription row is reported as the free plan.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"planKey\": \"free\",\n    \"planName\": \"Free\",\n    \"monthlyCredits\": 0,\n    \"maxResumes\": 3,\n    \"maxWorkspaces\": 3,\n    \"status\": \"active\",\n    \"currentPeriodEnd\": null,\n    \"cancelAtPeriodEnd\": false\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Billing Portal Session",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payments/portal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "portal"
+              ]
+            },
+            "description": "Stripe's hosted portal for managing/cancelling a subscription and updating a payment method — legally required in most jurisdictions (cancelling must be as easy as subscribing) and deliberately NOT reimplemented here; card data, proration, and cancellation timing are all Stripe's problem. 404s if the user has no Stripe customer on file (i.e. is on the free plan and never checked out).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/portal",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "portal"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"url\": \"https://billing.stripe.com/p/session/test_...\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-22T09:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — free plan, no billing account yet",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/portal",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "portal"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"No billing account on file — you are on the free plan.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-22T09:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Stripe Webhook (Stripe-only — not directly callable)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payments/webhook",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "webhook"
+              ]
+            },
+            "description": "**Not callable from Postman** — this endpoint verifies the raw request body against the `Stripe-Signature` header using `STRIPE_WEBHOOK_SECRET`; a hand-built Postman body will always 400 with `WEBHOOK_SIGNATURE_INVALID`. To exercise it locally, run `stripe listen --forward-to localhost:3000/api/v1/payments/webhook` and `stripe trigger checkout.session.completed` (or `invoice.payment_succeeded` / `invoice.payment_failed` / `customer.subscription.updated`) from the Stripe CLI. Idempotent (a replayed `event.id` is skipped) and safe against out-of-order delivery."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/webhook",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "webhook"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"received\": true\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Get Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "live"
+              ]
+            },
+            "description": "Deliberately checks NO dependency — proves only that the process itself is responsive. A Postgres/Redis outage should page someone, not trigger a container-restart storm on every replica; that's what readiness is for."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/health/live",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "health",
+                    "live"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"ok\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Readiness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            },
+            "description": "Pings Postgres and Redis. Returns the raw Terminus health-check shape (NOT the usual {success,data,meta} envelope) — 503s if either dependency is unreachable. A deploy should gate on this; a load balancer should stop routing to an instance failing it."
+          },
+          "response": [
+            {
+              "name": "200 OK — both dependencies healthy",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/health/ready",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "health",
+                    "ready"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"ok\",\n  \"info\": {\n    \"database\": {\n      \"status\": \"up\"\n    },\n    \"redis\": {\n      \"status\": \"up\"\n    }\n  },\n  \"error\": {},\n  \"details\": {\n    \"database\": {\n      \"status\": \"up\"\n    },\n    \"redis\": {\n      \"status\": \"up\"\n    }\n  }\n}"
+            },
+            {
+              "name": "503 Service Unavailable — Redis unreachable",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/health/ready",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "health",
+                    "ready"
+                  ]
+                }
+              },
+              "status": "Service Unavailable",
+              "code": 503,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"status\": \"error\",\n  \"info\": {\n    \"database\": {\n      \"status\": \"up\"\n    }\n  },\n  \"error\": {\n    \"redis\": {\n      \"status\": \"down\",\n      \"message\": \"connect ECONNREFUSED\"\n    }\n  },\n  \"details\": {\n    \"database\": {\n      \"status\": \"up\"\n    },\n    \"redis\": {\n      \"status\": \"down\",\n      \"message\": \"connect ECONNREFUSED\"\n    }\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Get Dashboard Overview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dashboard"
+              ]
+            },
+            "description": "One batched round-trip (credit balance, plan, resume/workspace counts, recent workspaces, unread notifications) — cached in Redis for 30s per user.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/dashboard",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "dashboard"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"creditBalance\": 87,\n    \"plan\": {\n      \"key\": \"free\",\n      \"name\": \"Free\",\n      \"status\": \"active\",\n      \"monthlyCredits\": 0\n    },\n    \"resumes\": {\n      \"count\": 2,\n      \"limit\": 3\n    },\n    \"workspaces\": {\n      \"total\": 4,\n      \"completed\": 3,\n      \"processing\": 1,\n      \"failed\": 0,\n      \"recent\": [\n        {\n          \"id\": \"{{workspaceId}}\",\n          \"name\": \"Acme — Backend Engineer\",\n          \"status\": \"completed\",\n          \"updatedAt\": \"2026-07-21T19:00:00.000Z\"\n        }\n      ]\n    },\n    \"unreadNotifications\": 3\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Credits",
+      "item": [
+        {
+          "name": "Get Balance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/credits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "credits"
+              ]
+            },
+            "description": "SUM of the append-only credit ledger for the current user.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/credits",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "credits"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"balance\": 87\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-22T09:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Ledger History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/credits/history?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "credits",
+                "history"
+              ]
+            },
+            "description": "The ledger's whole selling point is auditability — every grant, debit, and refund that makes up the balance, cursor-paginated, newest first. `reason` includes `signup_bonus`, `analyze`, `refund`, `retry_reversal`, `monthly_refill`, `cover_letter_regenerate`, and more.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/credits/history?limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "credits",
+                    "history"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d\",\n      \"amount\": -21,\n      \"reason\": \"analyze\",\n      \"referenceId\": \"{{runId}}\",\n      \"referenceType\": null,\n      \"createdAt\": \"2026-07-22T08:55:00.000Z\"\n    },\n    {\n      \"id\": \"6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d\",\n      \"amount\": 100,\n      \"reason\": \"signup_bonus\",\n      \"referenceId\": null,\n      \"referenceType\": null,\n      \"createdAt\": \"2026-07-21T09:00:00.000Z\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-22T09:00:00.000Z\",\n    \"nextCursor\": null,\n    \"hasMore\": false\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Inspect Run",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/runs/{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "runs",
+                "{{runId}}"
+              ]
+            },
+            "description": "Admin-only (role=`admin` AND email on `ADMIN_ALLOWED_EMAILS`) — the full run plus every step row, for debugging a stuck or failed analysis.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/runs/{{runId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "runs",
+                    "{{runId}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"run\": {\n      \"id\": \"{{runId}}\",\n      \"status\": \"completed\",\n      \"progress\": 100,\n      \"creditsCharged\": 21\n    },\n    \"steps\": [\n      {\n        \"name\": \"parse_resume\",\n        \"status\": \"completed\",\n        \"attempt\": 1,\n        \"costUsd\": \"0.002100\"\n      },\n      {\n        \"name\": \"score_ats\",\n        \"status\": \"completed\",\n        \"attempt\": 1,\n        \"costUsd\": \"0.004300\"\n      }\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "403 Forbidden — not an admin",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/runs/{{runId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "runs",
+                    "{{runId}}"
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"FORBIDDEN\",\n    \"message\": \"Admin access required.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Dead-Letter Jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/queues/documents/dead-letter",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "queues",
+                "documents",
+                "dead-letter"
+              ]
+            },
+            "description": "Queue name is one of `resumes` | `pipeline` | `documents` | `emails`. Supports `?start=&end=` for pagination through BullMQ's failed set.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/queues/documents/dead-letter",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "queues",
+                    "documents",
+                    "dead-letter"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"482\",\n      \"name\": \"generate\",\n      \"data\": {\n        \"documentId\": \"{{documentId}}\"\n      },\n      \"attemptsMade\": 3,\n      \"failedReason\": \"Puppeteer launch timed out\",\n      \"timestamp\": 1753123200000\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Retry Dead-Letter Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/queues/documents/dead-letter/{{jobId}}/retry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "queues",
+                "documents",
+                "dead-letter",
+                "{{jobId}}",
+                "retry"
+              ]
+            },
+            "description": "Re-queues one failed job for another attempt. Logged to the audit log as `admin.dead_letter.retry`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/queues/documents/dead-letter/{{jobId}}/retry",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "queues",
+                    "documents",
+                    "dead-letter",
+                    "{{jobId}}",
+                    "retry"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"requeued\": true\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — job no longer in the failed set",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/queues/documents/dead-letter/{{jobId}}/retry",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "queues",
+                    "documents",
+                    "dead-letter",
+                    "{{jobId}}",
+                    "retry"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"No job jobId in queue documents\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Cost Breakdown",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/costs?days=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "costs"
+              ]
+            },
+            "description": "Real AI spend from `token_usage`: by feature, by day, and the top 20 spending users.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/costs?days=30",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "costs"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"since\": \"2026-06-21T20:00:00.000Z\",\n    \"byFeature\": [\n      {\n        \"feature\": \"resume_extraction\",\n        \"costUsd\": \"1.234500\",\n        \"calls\": \"412\"\n      }\n    ],\n    \"byDay\": [\n      {\n        \"day\": \"2026-07-21T00:00:00.000Z\",\n        \"costUsd\": \"0.081200\"\n      }\n    ],\n    \"topUsers\": [\n      {\n        \"userId\": \"{{userId}}\",\n        \"costUsd\": \"0.412300\"\n      }\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Prompt Versions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/prompts/cover_letter/versions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "prompts",
+                "cover_letter",
+                "versions"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/prompts/cover_letter/versions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "prompts",
+                    "cover_letter",
+                    "versions"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"key\": \"cover_letter\",\n      \"version\": 2,\n      \"isActive\": true,\n      \"changeNote\": \"Tightened tone guidance\"\n    },\n    {\n      \"key\": \"cover_letter\",\n      \"version\": 1,\n      \"isActive\": false,\n      \"changeNote\": null\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Activate Prompt Version",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/prompts/cover_letter/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "prompts",
+                "cover_letter",
+                "activate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Flips exactly one version active for this key, transactionally. Logged to the audit log as `admin.prompt.activate`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/prompts/cover_letter/activate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "prompts",
+                    "cover_letter",
+                    "activate"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"version\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"activated\": true\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Audit Log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/audit?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "audit"
+              ]
+            },
+            "description": "Optional filters: `userId`, `action`, `resourceType`. Cursor-paginated.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/audit?limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "audit"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e\",\n      \"userId\": \"{{userId}}\",\n      \"actorType\": \"admin\",\n      \"action\": \"admin.prompt.activate\",\n      \"resourceType\": \"prompt_template\",\n      \"metadata\": {\n        \"key\": \"cover_letter\",\n        \"version\": 1\n      },\n      \"createdAt\": \"2026-07-21T20:00:00.000Z\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\",\n    \"nextCursor\": null,\n    \"hasMore\": false\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "GDPR",
+      "item": [
+        {
+          "name": "Request Data Export",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/gdpr/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gdpr",
+                "export"
+              ]
+            },
+            "description": "Queued, not synchronous — a worker collects everything (profile, resumes, workspaces, ATS reports, cover letters, credit ledger, ...) into one JSON file and notifies you (in-app + email) with a signed download link once it's ready.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "202 Accepted",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/gdpr/export",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "gdpr",
+                    "export"
+                  ]
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": null,\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
             }
           ]
         }
@@ -5185,6 +7162,21 @@
     },
     {
       "key": "questionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "documentId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "notificationId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "jobId",
       "value": "",
       "type": "string"
     }

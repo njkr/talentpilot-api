@@ -1,0 +1,13 @@
+{{> _base}}
+<div class="contact">
+  {{#if fullName}}<strong>{{fullName}}</strong><br/>{{/if}}
+  {{#if email}}{{email}}{{/if}}{{#if phone}} &middot; {{phone}}{{/if}}
+</div>
+<p class="muted">{{date}}</p>
+<p class="muted">Re: {{position}}{{#if company}} at {{company}}{{/if}}</p>
+
+<div>
+  {{#each paragraphs}}
+    <p>{{this}}</p>
+  {{/each}}
+</div>

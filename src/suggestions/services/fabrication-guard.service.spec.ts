@@ -53,6 +53,30 @@ describe('FabricationGuardService', () => {
     expect(result.safe).toBe(true);
   });
 
+  it('accepts a known/allowed org even when it is glued to other capitalised words in the same phrase (e.g. a salutation)', () => {
+    // extractCapitalisedPhrases() pulls out the whole contiguous run — "Dear Stripe
+    // Hiring Team" is ONE candidate, not "Stripe" standalone. A cover letter greeting
+    // the company by name (exactly what it's told to do) must not be flagged just
+    // because the org name isn't the ENTIRE phrase.
+    const result = guard.check(
+      'Dear Stripe Hiring Team, I am excited about this role...',
+      'Software engineer responsible for backend systems',
+      [],
+      ['Stripe'],
+    );
+    expect(result.safe).toBe(true);
+  });
+
+  it('still flags a wholly different fabricated org sharing no known/allowed org as a substring', () => {
+    const result = guard.check(
+      'Excited to leverage my time at Wayne Enterprises for this role',
+      'Software engineer responsible for backend systems',
+      [],
+      ['Stripe'],
+    );
+    expect(result.safe).toBe(false);
+  });
+
   it('flags an invented credential', () => {
     const result = guard.check(
       'Certified AWS Solutions Architect with deployment experience',

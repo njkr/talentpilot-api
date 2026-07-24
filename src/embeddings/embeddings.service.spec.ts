@@ -105,4 +105,19 @@ describe('EmbeddingsService', () => {
     expect(query).toHaveBeenCalledTimes(1);
     expect(query.mock.calls[0][0]).toContain('LATERAL');
   });
+
+  it('excludes the summary chunk from requirement matching', async () => {
+    // The summary restates the whole resume — it would otherwise win every single
+    // requirement match on cosine similarity, and the user sees the same sentence
+    // quoted as "evidence" for every single requirement.
+    const query = jest.fn().mockResolvedValue([]);
+    const dataSource = { query } as any;
+    const service = new EmbeddingsService({} as any, {} as any, dataSource);
+
+    await service.matchRequirements('resume-1', 1, 'jd-1');
+
+    expect(query.mock.calls[0][0]).toContain(
+      "r.metadata->>'sectionType' <> 'summary'",
+    );
+  });
 });

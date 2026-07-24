@@ -16,6 +16,8 @@ import { ResumeParserService } from './resumes/services/resume-parser.service';
 import { AiModule } from './ai/ai.module';
 import { PipelineCommonModule } from './pipeline/pipeline-common.module';
 import { PipelineWorkerModule } from './pipeline/pipeline-worker.module';
+import { DocumentsWorkerModule } from './documents/documents-worker.module';
+import { GdprWorkerModule } from './gdpr/gdpr-worker.module';
 import { dataSourceOptions } from './database/data-source';
 
 // The worker process's own root module. Originally deliberately narrow (just
@@ -26,11 +28,14 @@ import { dataSourceOptions } from './database/data-source';
 // and keeping it out of the API process's DI graph keeps that process's boot light.
 // Sprint 5/6 add the 'pipeline' queue + PipelineWorkerModule (StepRunner + the 5
 // analysis steps) — same reasoning, the full AI/embeddings/ATS graph stays worker-side.
-// EventEmitterModule is registered (not because the worker emits domain events — it
-// still doesn't) but because PipelineWorkerModule transitively pulls in ResumesModule
-// (for FileValidatorService/TextExtractorService reuse), and ResumesService itself
-// requires EventEmitter2 to construct even though its event-emitting method
-// (upload()) is never called from anything running in this process.
+// EventEmitterModule is registered for two reasons now: PipelineWorkerModule
+// transitively pulls in ResumesModule (for FileValidatorService/TextExtractorService
+// reuse) and ResumesService requires EventEmitter2 to construct even though its
+// event-emitting method (upload()) never runs in this process; and, as of Sprint 9,
+// StepRunner genuinely emits 'run.completed'/'run.failed' here, consumed by
+// PipelineNotificationListener (see pipeline-worker.module.ts).
+// Sprint 9 adds the 'documents' queue + DocumentsWorkerModule (Puppeteer/docx
+// rendering) — same worker-only reasoning as AiModule/PipelineWorkerModule.
 @Module({
   imports: [
     ConfigModule,
@@ -49,6 +54,8 @@ import { dataSourceOptions } from './database/data-source';
     AiModule,
     PipelineCommonModule, // PipelineRun/PipelineStep repos — RunJanitor needs these directly
     PipelineWorkerModule, // StepRunner + steps
+    DocumentsWorkerModule, // DocumentsProcessor (Puppeteer/docx rendering)
+    GdprWorkerModule, // GdprExportProcessor (multi-table data export)
   ],
   providers: [
     ResumeProcessor,

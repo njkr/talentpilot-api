@@ -60,6 +60,17 @@ export const Problems = {
       'Your session is no longer valid. Please sign in again.',
     ),
 
+  // A merely-expired ACCESS token — distinct from TOKEN_INVALID (malformed, bad
+  // signature, stale user/tokenVersion): the frontend contract is "silently refresh"
+  // for this one, not "hard logout" (see ErrorCode.TOKEN_EXPIRED's own comment).
+  // Thrown from JwtAuthGuard.handleRequest() when Passport's `info` is a
+  // TokenExpiredError, before it would otherwise fall through to a generic 401.
+  tokenExpired: () =>
+    new AppException(
+      ErrorCode.TOKEN_EXPIRED,
+      'Your access token has expired. Refresh it and retry.',
+    ),
+
   // The soft-fail for a refresh race (see AuthService.rotateRefresh). NOT a security event.
   refreshSuperseded: () =>
     new AppException(
@@ -222,6 +233,16 @@ export const Problems = {
     new AppException(
       ErrorCode.REPORT_NOT_READY,
       `This workspace has no completed analysis yet (status: ${status}). Start or wait for a run to finish.`,
+      { status },
+    ),
+
+  // ── Sprint 9: documents ────────────────────────────────────────────────────
+  documentNotReady: (status: string) =>
+    new AppException(
+      ErrorCode.DOCUMENT_NOT_READY,
+      status === 'failed'
+        ? 'This document failed to generate. Request it again.'
+        : `This document is still ${status}. Try again shortly.`,
       { status },
     ),
 };

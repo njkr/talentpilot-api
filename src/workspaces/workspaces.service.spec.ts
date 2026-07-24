@@ -21,6 +21,9 @@ function build() {
   const resumesService = { findOwned: jest.fn().mockResolvedValue({}) };
   const jdsService = { findOwned: jest.fn().mockResolvedValue({}) };
   const credits = { balance: jest.fn(), debitWithin: jest.fn() };
+  const planLimits = {
+    assertCanCreateWorkspace: jest.fn().mockResolvedValue(undefined),
+  };
   const dataSource = { transaction: jest.fn() };
 
   const service = new WorkspacesService(
@@ -33,6 +36,7 @@ function build() {
     resumesService as any,
     jdsService as any,
     credits as any,
+    planLimits as any,
     dataSource as any,
   );
   return {

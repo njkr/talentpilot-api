@@ -1,6 +1,34 @@
 import { AtsService } from './ats.service';
 
-function build(gradedOverrides: Partial<Record<string, unknown>> = {}) {
+const REQUIREMENTS_WITH_EDUCATION = [
+  {
+    text: '5+ years backend experience',
+    category: 'experience',
+    importance: 'required',
+  },
+  {
+    text: "Bachelor's degree in Computer Science or related field",
+    category: 'education',
+    importance: 'preferred',
+  },
+];
+const REQUIREMENTS_WITHOUT_EDUCATION = [
+  {
+    text: '5+ years backend experience',
+    category: 'experience',
+    importance: 'required',
+  },
+  {
+    text: 'Strong TypeScript skills',
+    category: 'technical',
+    importance: 'required',
+  },
+];
+
+function build(
+  gradedOverrides: Partial<Record<string, unknown>> = {},
+  requirements: unknown[] = REQUIREMENTS_WITH_EDUCATION,
+) {
   const complete = jest.fn().mockResolvedValue({
     data: {
       experienceScore: 70,
@@ -54,7 +82,16 @@ function build(gradedOverrides: Partial<Record<string, unknown>> = {}) {
     resume: {},
     resumeVersion: 1,
     sections: [],
-    jd: { position: 'Engineer', parsedData: null },
+    jd: {
+      position: 'Engineer',
+      parsedData: {
+        position: 'Engineer',
+        seniority: 'mid',
+        experienceRequired: '5+ years',
+        requirements,
+        responsibilities: [],
+      },
+    },
     artifacts: new Map(),
   } as any;
   const matchData = {
@@ -87,7 +124,10 @@ describe('AtsService.generate', () => {
   });
 
   it('excludes education from the score (renormalizing weights) rather than zeroing it', async () => {
-    const { service, ctx, matchData } = build({ educationScore: null });
+    const { service, ctx, matchData } = build(
+      { educationScore: null },
+      REQUIREMENTS_WITHOUT_EDUCATION,
+    );
     const report = await service.generate(ctx, matchData);
 
     expect(report.educationScore).toBeNull();
@@ -96,6 +136,24 @@ describe('AtsService.generate', () => {
       0.3 * 91 + 0.2 * 28 + 0.15 * 70 + 0.1 * 80 + 0.1 * 90 + 0.05 * 90;
     const expected = Math.round(weightedSum / 0.9);
     expect(report.overallScore).toBe(expected);
+    expect(
+      report.scoreBreakdown.find((c: any) => c.component === 'education'),
+    ).toBeUndefined();
+  });
+
+  it('forces educationScore to null when the JD has no education requirement, even if the model returns a number anyway', async () => {
+    // The prompt tells the model to return null here, but nothing stops a model
+    // under no real pressure from inventing a plausible-looking score instead —
+    // this is exactly the "10 free points" failure mode: whether to score education
+    // at all must be decided from the JD's own parsed requirements in code, not
+    // trusted to the model's own null/non-null judgement.
+    const { service, ctx, matchData } = build(
+      { educationScore: 95 },
+      REQUIREMENTS_WITHOUT_EDUCATION,
+    );
+    const report = await service.generate(ctx, matchData);
+
+    expect(report.educationScore).toBeNull();
     expect(
       report.scoreBreakdown.find((c: any) => c.component === 'education'),
     ).toBeUndefined();
