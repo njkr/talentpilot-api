@@ -11,6 +11,7 @@ import { AppException } from '../common/exceptions/app.exception';
 import { Problems } from '../common/problems';
 import { CursorQueryDto } from '../common/dto/cursor-query.dto';
 import { decodeCursor, encodeCursor } from '../common/utils/cursor.util';
+import { UNTITLED_POSITION } from './dto/jd-response.dto';
 
 const MIN_JD_CHARS = 100;
 
@@ -75,7 +76,7 @@ export class JobDescriptionsService {
         descriptionRaw: text,
         contentHash,
         source,
-        position: position ?? 'Untitled position',
+        position: position ?? UNTITLED_POSITION,
         company: company ?? null,
         status: 'pending',
       }),
@@ -168,6 +169,25 @@ export class JobDescriptionsService {
     const jd = await this.findOwned(id, userId);
     if (jd.status !== 'failed') return jd;
     return this.analyse(jd);
+  }
+
+  /**
+   * User-confirmed correction for whatever the AI parse (or upload(), which has no
+   * fields to pass at ingest time) came up empty on — see JdResponse.missingFields.
+   * Does not re-run analysis: the user is asserting ground truth, not asking us to
+   * re-guess it. No-op (returns the row unchanged) if neither field is given, so the
+   * FE doesn't need to special-case an empty confirmation.
+   */
+  async updateFields(
+    id: string,
+    userId: string,
+    fields: { position?: string; company?: string },
+  ): Promise<JobDescription> {
+    await this.findOwned(id, userId);
+    if (fields.position !== undefined || fields.company !== undefined) {
+      await this.jds.update(id, fields);
+    }
+    return this.findOwned(id, userId);
   }
 
   /** Same normalization as resumes — a JD copied from a job board carries a lot of junk. */

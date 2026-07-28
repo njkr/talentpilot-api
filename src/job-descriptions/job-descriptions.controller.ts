@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UploadedFile,
@@ -29,6 +30,7 @@ import {
 } from 'src/common/swagger/api-response.decorator';
 import { JobDescriptionsService } from './job-descriptions.service';
 import { PasteJdDto } from './dto/paste-jd.dto';
+import { UpdateJdDto } from './dto/update-jd.dto';
 import { JdResponse } from './dto/jd-response.dto';
 
 @ApiTags('job-descriptions')
@@ -93,6 +95,29 @@ export class JobDescriptionsController {
   })
   async get(@CurrentUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
     return new JdResponse(await this.jds.findOwned(id, user.id));
+  }
+
+  @Patch(':id')
+  @ApiOperation({
+    summary:
+      'Fill in company/position the AI parse (or upload) came up without',
+    description:
+      'Corrects JdResponse.missingFields — most useful right after upload(), which ' +
+      'has no fields to pass at ingest time. Does not re-run analysis; the caller is ' +
+      'asserting ground truth. Recommended before triggering analyze() on a workspace ' +
+      'so the pipeline has a company to research and a real position to write toward, ' +
+      'rather than the user discovering the gap only after a partial run.',
+  })
+  @ApiDataResponse(200, JdResponse, 'Updated.')
+  @ApiErrorResponses({
+    404: 'No job description with that id belongs to the current user.',
+  })
+  async update(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateJdDto,
+  ) {
+    return new JdResponse(await this.jds.updateFields(id, user.id, dto));
   }
 
   @Post(':id/retry')
