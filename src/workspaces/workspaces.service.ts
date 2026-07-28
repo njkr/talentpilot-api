@@ -10,6 +10,7 @@ import { STEP_COUNT } from '../pipeline/steps/step-manifest';
 import { ResumesService } from '../resumes/resumes.service';
 import { JobDescriptionsService } from '../job-descriptions/job-descriptions.service';
 import { CreditService } from '../credits/credit.service';
+import { PaymentConfigService } from '../payments/config/payment-config.service';
 import { PlanLimitService } from '../subscriptions/plan-limit.service';
 import { Problems } from '../common/problems';
 import { CursorQueryDto } from '../common/dto/cursor-query.dto';
@@ -17,16 +18,19 @@ import { decodeCursor, encodeCursor } from '../common/utils/cursor.util';
 import { AtsReport } from '../ats/entities/ats-report.entity';
 import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
 
-// Sum of every step's creditWeight in STEP_MANIFEST (Sprints 5-8) — keep in sync.
+// Historically a hardcoded 21 (sum of every step's creditWeight in STEP_MANIFEST,
+// Sprints 5-8) — now admin-editable via PaymentConfig.analyzeCost (Sprint 13; see
+// PaymentConfigService.get()). Not required to equal STEP_MANIFEST's total weight:
+// StepRunner.finalise()'s proportional refund computes its own totalWeight
+// independently, so the refund math stays correct at any charged amount.
 //
 // Deliberately a FLAT fee, charged once regardless of how many steps a retry
 // ultimately skips (e.g. re-analysing an unchanged resume/JD pair skips
-// parse_resume/parse_jd, weight 3 of 21, but is still charged the full 21). This is
-// an intentional policy, not a bug: "analyze" is priced as one action, and a partial
-// discount for internal step reuse would need its own product decision (a skipped
-// step isn't "refunded work" the way a genuinely FAILED step is — see
+// parse_resume/parse_jd, weight 3 of 21, but is still charged the full amount). This
+// is an intentional policy, not a bug: "analyze" is priced as one action, and a
+// partial discount for internal step reuse would need its own product decision (a
+// skipped step isn't "refunded work" the way a genuinely FAILED step is — see
 // StepRunner.finalise()'s proportional refund, which only ever applies to failures).
-const ANALYZE_CREDIT_COST = 21;
 const ONE_ACTIVE_RUN_CONSTRAINT = 'one_active_run_per_workspace';
 
 @Injectable()
@@ -47,6 +51,7 @@ export class WorkspacesService {
     private readonly jdsService: JobDescriptionsService,
     private readonly credits: CreditService,
     private readonly planLimits: PlanLimitService,
+    private readonly paymentConfig: PaymentConfigService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -132,9 +137,10 @@ export class WorkspacesService {
       throw Problems.jdNotReady(ws.jobDescription.status);
     }
 
+    const analyzeCost = (await this.paymentConfig.get()).analyzeCost;
     const balance = await this.credits.balance(userId);
-    if (balance < ANALYZE_CREDIT_COST) {
-      throw Problems.insufficientCredits(ANALYZE_CREDIT_COST, balance);
+    if (balance < analyzeCost) {
+      throw Problems.insufficientCredits(analyzeCost, balance);
     }
 
     // ── Run creation + credit debit in ONE transaction ──
@@ -153,14 +159,14 @@ export class WorkspacesService {
             status: 'queued',
             trigger: 'full_analyze',
             stepsTotal: STEP_COUNT,
-            creditsCharged: ANALYZE_CREDIT_COST,
+            creditsCharged: analyzeCost,
             resumeVersion: ws.resume.currentVersion,
           }),
         );
         await this.credits.debitWithin(
           m,
           userId,
-          ANALYZE_CREDIT_COST,
+          analyzeCost,
           'analyze',
           created.id,
         );

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { Env } from '../config/config.module';
 import { CreditService } from './credit.service';
+import { PaymentConfigService } from '../payments/config/payment-config.service';
 
 @Injectable()
 export class CreditsListener {
@@ -9,17 +9,14 @@ export class CreditsListener {
 
   constructor(
     private readonly credits: CreditService,
-    private readonly env: Env,
+    private readonly paymentConfig: PaymentConfigService,
   ) {}
 
   @OnEvent('user.registered')
   async onRegistered({ user }: any) {
     try {
-      await this.credits.grant(
-        user.id,
-        this.env.get('SIGNUP_CREDIT_GRANT'),
-        'signup_bonus',
-      );
+      const { signupCreditGrant } = await this.paymentConfig.get();
+      await this.credits.grant(user.id, signupCreditGrant, 'signup_bonus');
     } catch (err) {
       // A failed signup bonus must never fail registration itself — worst case the
       // user has 0 credits and support grants them manually.

@@ -12,6 +12,7 @@ import { CoverLetterController } from './cover-letter.controller';
 import { AiModule } from '../ai/ai.module';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
 import { CreditsModule } from '../credits/credits.module';
+import { PaymentConfigModule } from '../payments/config/payment-config.module';
 import { FabricationGuardService } from '../suggestions/services/fabrication-guard.service';
 
 /**
@@ -34,6 +35,7 @@ import { FabricationGuardService } from '../suggestions/services/fabrication-gua
     AiModule,
     EmbeddingsModule,
     CreditsModule,
+    PaymentConfigModule,
   ],
   controllers: [CoverLetterController],
   // FabricationGuardService is a stateless, dependency-free utility (see

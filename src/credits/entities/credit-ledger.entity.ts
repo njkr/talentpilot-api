@@ -20,7 +20,12 @@ export type CreditReason =
   // A prior attempt on this run was proportionally refunded, then a retry delivered
   // the complete product — this reverses that earlier refund. See
   // StepRunner.finalise()/reverseRefund().
-  | 'retry_reversal';
+  | 'retry_reversal'
+  // ── Sprint 13: credit packs & referrals ──
+  | 'referral_reward' // the inviter's cut, granted on the referee's qualifying event
+  | 'referral_bonus' // the invited user's own bonus, granted at the same time
+  // ── Sprint 14: cancellation & plan switching ──
+  | 'plan_upgrade'; // the credit-allotment gap granted on an immediate upgrade (see switchPlan())
 
 /**
  * An append-only ledger, not a mutable balance column. Balance is always

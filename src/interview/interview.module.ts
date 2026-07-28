@@ -7,6 +7,7 @@ import { InterviewController } from './interview.controller';
 import { AiModule } from '../ai/ai.module';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
 import { CreditsModule } from '../credits/credits.module';
+import { PaymentConfigModule } from '../payments/config/payment-config.module';
 
 /** Dual-use, same reasoning as CoverLetterModule: pipeline step + direct API endpoints. */
 @Module({
@@ -15,6 +16,7 @@ import { CreditsModule } from '../credits/credits.module';
     AiModule,
     EmbeddingsModule,
     CreditsModule,
+    PaymentConfigModule,
   ],
   controllers: [InterviewController],
   providers: [InterviewService],

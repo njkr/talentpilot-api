@@ -8,6 +8,7 @@ import { PipelineCommonModule } from '../pipeline/pipeline-common.module';
 import { ResumesModule } from '../resumes/resumes.module';
 import { JobDescriptionsModule } from '../job-descriptions/job-descriptions.module';
 import { CreditsModule } from '../credits/credits.module';
+import { PaymentConfigModule } from '../payments/config/payment-config.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AtsReport } from '../ats/entities/ats-report.entity';
 import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
@@ -23,6 +24,7 @@ import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
     ResumesModule,
     JobDescriptionsModule,
     CreditsModule,
+    PaymentConfigModule,
     SubscriptionsModule,
   ],
   controllers: [WorkspacesController],

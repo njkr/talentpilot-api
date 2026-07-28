@@ -9,10 +9,9 @@ import { Workspace } from '../workspaces/entities/workspace.entity';
 import { PipelineContext } from '../pipeline/steps/step.interface';
 import { ChunkerService } from '../embeddings/services/chunker.service';
 import { CreditService } from '../credits/credit.service';
+import { PaymentConfigService } from '../payments/config/payment-config.service';
 import { Problems } from '../common/problems';
 import { renderJdSummary } from '../job-descriptions/utils/render-jd.util';
-
-const ANSWER_FEEDBACK_CREDIT_COST = 1;
 
 @Injectable()
 export class InterviewService {
@@ -20,6 +19,7 @@ export class InterviewService {
     private readonly ai: AiService,
     private readonly chunker: ChunkerService,
     private readonly credits: CreditService,
+    private readonly paymentConfig: PaymentConfigService,
     @InjectRepository(InterviewQuestion)
     private readonly questions: Repository<InterviewQuestion>,
     @InjectRepository(Workspace)
@@ -89,9 +89,10 @@ export class InterviewService {
   ): Promise<InterviewQuestion> {
     const q = await this.assertOwned(questionId, userId);
 
+    const feedbackCost = (await this.paymentConfig.get()).interviewFeedbackCost;
     const balance = await this.credits.balance(userId);
-    if (balance < ANSWER_FEEDBACK_CREDIT_COST) {
-      throw Problems.insufficientCredits(ANSWER_FEEDBACK_CREDIT_COST, balance);
+    if (balance < feedbackCost) {
+      throw Problems.insufficientCredits(feedbackCost, balance);
     }
 
     const { data: fb } = await this.ai.complete<InterviewFeedback>({
@@ -107,7 +108,7 @@ export class InterviewService {
 
     await this.credits.debit(
       userId,
-      ANSWER_FEEDBACK_CREDIT_COST,
+      feedbackCost,
       'answer_feedback',
       questionId,
     );
