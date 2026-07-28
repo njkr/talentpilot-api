@@ -10,10 +10,9 @@ import { Problems } from 'src/common/problems';
 // Fallback if the `plans` table hasn't been seeded in some environment (fresh DB,
 // migration not yet run) — matches the numbers the Sprint 2 stub originally hardcoded,
 // so a missing seed degrades to the old behaviour rather than crashing every request.
-const FREE_PLAN_FALLBACK: Pick<Plan, 'key' | 'maxResumes' | 'maxWorkspaces'> = {
+const FREE_PLAN_FALLBACK: Pick<Plan, 'key' | 'limits'> = {
   key: 'free',
-  maxResumes: 3,
-  maxWorkspaces: 3,
+  limits: { maxResumes: 3, maxWorkspaces: 3, regenPerDay: -1 },
 };
 
 /**
@@ -35,23 +34,27 @@ export class PlanLimitService {
 
   async assertCanCreateResume(userId: string): Promise<void> {
     const plan = await this.planFor(userId);
-    if (plan.maxResumes === -1) return;
+    if (plan.limits.maxResumes === -1) return;
 
     const current = await this.resumes.count({ where: { userId } });
-    if (current >= plan.maxResumes) {
-      throw Problems.planLimitReached('resumes', plan.maxResumes, current);
+    if (current >= plan.limits.maxResumes) {
+      throw Problems.planLimitReached(
+        'resumes',
+        plan.limits.maxResumes,
+        current,
+      );
     }
   }
 
   async assertCanCreateWorkspace(userId: string): Promise<void> {
     const plan = await this.planFor(userId);
-    if (plan.maxWorkspaces === -1) return;
+    if (plan.limits.maxWorkspaces === -1) return;
 
     const current = await this.workspaces.count({ where: { userId } });
-    if (current >= plan.maxWorkspaces) {
+    if (current >= plan.limits.maxWorkspaces) {
       throw Problems.planLimitReached(
         'workspaces',
-        plan.maxWorkspaces,
+        plan.limits.maxWorkspaces,
         current,
       );
     }

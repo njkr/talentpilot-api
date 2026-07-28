@@ -80,8 +80,7 @@ describe('PlanLimitService', () => {
     });
     planFindOne.mockResolvedValueOnce({
       key: 'pro',
-      maxResumes: 25,
-      maxWorkspaces: 100,
+      limits: { maxResumes: 25, maxWorkspaces: 100, regenPerDay: -1 },
     });
     resumeCount.mockResolvedValueOnce(10);
 
@@ -98,8 +97,7 @@ describe('PlanLimitService', () => {
     });
     planFindOne.mockResolvedValueOnce({
       key: 'ultimate',
-      maxResumes: -1,
-      maxWorkspaces: -1,
+      limits: { maxResumes: -1, maxWorkspaces: -1, regenPerDay: -1 },
     });
     resumeCount.mockResolvedValueOnce(9999);
 
