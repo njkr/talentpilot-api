@@ -22,6 +22,7 @@ import { TokenUsage } from '../ai/entities/token-usage.entity';
 import { Notification } from '../notifications/entities/notification.entity';
 import { NotificationPreference } from '../notifications/entities/notification-preference.entity';
 import { StorageModule } from '../storage/storage.module';
+import { IntegrationCallsModule } from '../integration-calls/integration-calls.module';
 import { GdprService } from './gdpr.service';
 import { GdprController } from './gdpr.controller';
 
@@ -51,6 +52,7 @@ import { GdprController } from './gdpr.controller';
     ]),
     BullModule.registerQueue({ name: 'gdpr' }), // API side: enqueues export jobs
     StorageModule,
+    IntegrationCallsModule,
   ],
   controllers: [GdprController],
   providers: [GdprService],

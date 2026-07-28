@@ -29,6 +29,8 @@ import { TokenUsage } from '../ai/entities/token-usage.entity';
 import { Notification } from '../notifications/entities/notification.entity';
 import { NotificationPreference } from '../notifications/entities/notification-preference.entity';
 import { StorageService } from '../storage/storage.service';
+import { IntegrationCallRecorderService } from '../integration-calls/integration-call-recorder.service';
+import { attachStripeUsageTracking } from '../integration-calls/stripe-usage-tracking.util';
 
 const PURGE_GRACE_DAYS = 30;
 const STRIPE_API_VERSION = '2026-06-24.dahlia' as const;
@@ -80,10 +82,12 @@ export class GdprService {
     @InjectRepository(NotificationPreference)
     private readonly notificationPrefs: Repository<NotificationPreference>,
     private readonly storage: StorageService,
+    private readonly integrationCalls: IntegrationCallRecorderService,
   ) {
     this.stripe = new Stripe(this.env.get('STRIPE_SECRET_KEY'), {
       apiVersion: STRIPE_API_VERSION,
     });
+    attachStripeUsageTracking(this.stripe, this.integrationCalls);
   }
 
   /** Heavy data collection happens worker-side (GdprExportProcessor) — this just enqueues. */

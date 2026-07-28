@@ -1,4 +1,5 @@
 const mockStripe = {
+  on: jest.fn(),
   subscriptions: { cancel: jest.fn() },
 };
 
@@ -40,6 +41,7 @@ function build() {
   const notifications = repo();
   const notificationPrefs = repo();
   const storage = { deletePrefix: jest.fn().mockResolvedValue(undefined) };
+  const integrationCalls = { record: jest.fn().mockResolvedValue(undefined) };
 
   const service = new GdprService(
     env as any,
@@ -64,6 +66,7 @@ function build() {
     notifications as any,
     notificationPrefs as any,
     storage as any,
+    integrationCalls as any,
   );
 
   return {
