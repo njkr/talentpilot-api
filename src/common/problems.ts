@@ -245,4 +245,72 @@ export const Problems = {
         : `This document is still ${status}. Try again shortly.`,
       { status },
     ),
+
+  // ── Sprint 13: configurable payments, credit packs & referrals ──────────────
+  featureDisabled: (feature: string) =>
+    new AppException(
+      ErrorCode.FEATURE_DISABLED,
+      `This feature is currently unavailable.`,
+      { feature },
+    ),
+
+  // ── Sprint 14: cancellation & plan switching ─────────────────────────────────
+  noActiveSubscription: () =>
+    new AppException(
+      ErrorCode.NO_ACTIVE_SUBSCRIPTION,
+      'You have no active paid subscription.',
+    ),
+
+  noSubscriptionToResume: () =>
+    new AppException(
+      ErrorCode.NO_SUBSCRIPTION_TO_RESUME,
+      'You have no subscription with a scheduled cancellation to resume.',
+    ),
+
+  planNotPurchasable: (planKey: string) =>
+    new AppException(
+      ErrorCode.PLAN_NOT_PURCHASABLE,
+      `Plan "${planKey}" is not available for that billing interval.`,
+      { planKey },
+    ),
+
+  alreadySubscribed: () =>
+    new AppException(
+      ErrorCode.ALREADY_SUBSCRIBED,
+      'You already have an active subscription — use the switch-plan endpoint to change plans, not checkout.',
+    ),
+
+  // A genuine no-op switch (nothing pending to undo). Deliberately a real AppException,
+  // not a plain BadRequestException — the global filter treats BadRequestException as a
+  // class-validator error and mangles the message into a fake `fields` entry (splits on
+  // the first word, so "You are already..." became `fields: { You: [...] }`). A
+  // business-rule rejection belongs in `message`, not synthesized into `fields`.
+  alreadyOnPlan: (planKey: string) =>
+    new AppException(
+      ErrorCode.ALREADY_SUBSCRIBED,
+      `You're already on the "${planKey}" plan.`,
+      { planKey },
+    ),
+
+  noPendingChange: () =>
+    new AppException(
+      ErrorCode.NO_SUBSCRIPTION_TO_RESUME,
+      'There is no pending plan change to cancel.',
+    ),
+
+  // A Stripe call inside cancel/switch/clear-pending failed for a reason we don't map
+  // to a more specific Problem — 502, not INTERNAL_ERROR, because the failure is
+  // downstream (Stripe), not this request's fault.
+  subscriptionUpdateFailed: () =>
+    new AppException(
+      ErrorCode.SUBSCRIPTION_UPDATE_FAILED,
+      'We could not update your subscription. Please try again.',
+    ),
+
+  // ── Admin: user management ───────────────────────────────────────────────
+  cannotModifyOwnAccess: () =>
+    new AppException(
+      ErrorCode.SELF_ACTION_FORBIDDEN,
+      'You cannot revoke your own admin access.',
+    ),
 };

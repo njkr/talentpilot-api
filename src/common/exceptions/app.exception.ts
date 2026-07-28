@@ -86,6 +86,19 @@ export const ErrorCode = {
   // platform
   RATE_LIMITED: 'RATE_LIMITED', // details: { retryAfterSec }
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+
+  // payments (Sprint 13)
+  FEATURE_DISABLED: 'FEATURE_DISABLED', // details: { feature } — admin has turned this off via PaymentConfig
+
+  // payments (Sprint 14: cancellation & plan switching)
+  NO_ACTIVE_SUBSCRIPTION: 'NO_ACTIVE_SUBSCRIPTION',
+  NO_SUBSCRIPTION_TO_RESUME: 'NO_SUBSCRIPTION_TO_RESUME',
+  PLAN_NOT_PURCHASABLE: 'PLAN_NOT_PURCHASABLE', // details: { planKey } — no price for that plan/interval
+  ALREADY_SUBSCRIBED: 'ALREADY_SUBSCRIBED', // use /payments/subscription/switch, not /checkout; also reused for "already on this plan" in switchPlan
+  SUBSCRIPTION_UPDATE_FAILED: 'SUBSCRIPTION_UPDATE_FAILED', // a Stripe call inside cancel/switch/clear-pending failed — never surface that as a raw 500
+
+  // admin (user management)
+  SELF_ACTION_FORBIDDEN: 'SELF_ACTION_FORBIDDEN', // an admin tried to revoke their own access
 } as const;
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 
@@ -131,6 +144,13 @@ const STATUS: Record<string, number> = {
   WEBHOOK_SIGNATURE_INVALID: 400,
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
+  FEATURE_DISABLED: 403,
+  NO_ACTIVE_SUBSCRIPTION: 404,
+  NO_SUBSCRIPTION_TO_RESUME: 404,
+  PLAN_NOT_PURCHASABLE: 404,
+  ALREADY_SUBSCRIBED: 409,
+  SUBSCRIPTION_UPDATE_FAILED: 502, // a downstream (Stripe) failure, not the client's fault
+  SELF_ACTION_FORBIDDEN: 400,
 };
 
 export class AppException extends HttpException {

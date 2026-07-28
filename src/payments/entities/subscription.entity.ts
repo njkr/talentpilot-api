@@ -38,6 +38,14 @@ export class Subscription {
   planKey: PlanKey;
   @Column({ type: 'varchar', default: 'active' }) status: SubscriptionStatus;
 
+  // Set when a plan SWITCH is scheduled for the next renewal — a downgrade keeps the
+  // user on `planKey` (their current, already-paid-for plan) until then. Cleared once
+  // onSubscriptionUpdated() sees the Stripe subscription's price actually change to
+  // this value (see PaymentsService.switchPlan()/planKeyForPrice()). An upgrade never
+  // sets this — upgrades apply to `planKey` immediately.
+  @Column({ name: 'pending_plan_key', type: 'varchar', nullable: true })
+  pendingPlanKey: PlanKey | null;
+
   @Column({ name: 'current_period_end', type: 'timestamptz', nullable: true })
   currentPeriodEnd: Date | null;
   @Column({ name: 'cancel_at_period_end', default: false })

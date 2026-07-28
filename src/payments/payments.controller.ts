@@ -20,6 +20,7 @@ import {
 } from 'src/common/swagger/api-response.decorator';
 import { PaymentsService } from './payments.service';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
+import { SwitchPlanDto } from './dto/switch-plan.dto';
 import {
   CheckoutSessionResponse,
   PortalSessionResponse,
@@ -58,6 +59,7 @@ export class PaymentsController {
       user.id,
       dto.planKey,
       idempotencyKey,
+      dto.interval,
     );
     return new CheckoutSessionResponse(url);
   }
@@ -88,6 +90,94 @@ export class PaymentsController {
     'Free plan if no subscription exists.',
   )
   async getSubscription(@CurrentUser() user: User) {
+    const { plan, subscription } = await this.payments.getSubscription(user.id);
+    return new SubscriptionResponse(plan, subscription);
+  }
+
+  @Post('subscription/cancel')
+  @HttpCode(200)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Schedule cancellation at the end of the current billing period',
+    description:
+      'Never cancels immediately — you keep your plan and its benefits until ' +
+      '`currentPeriodEnd`, then drop to free. An immediate cancel is a refund ' +
+      'question, not a cancel one.',
+  })
+  @ApiDataResponse(200, SubscriptionResponse, 'cancelAtPeriodEnd is now true.')
+  @ApiErrorResponses({
+    404: 'NO_ACTIVE_SUBSCRIPTION — you have no paid subscription to cancel.',
+  })
+  async cancel(@CurrentUser() user: User) {
+    await this.payments.cancelSubscription(user.id);
+    const { plan, subscription } = await this.payments.getSubscription(user.id);
+    return new SubscriptionResponse(plan, subscription);
+  }
+
+  @Post('subscription/resume')
+  @HttpCode(200)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Undo a scheduled cancellation',
+    description: 'A one-call undo — no need to re-subscribe.',
+  })
+  @ApiDataResponse(200, SubscriptionResponse, 'cancelAtPeriodEnd is now false.')
+  @ApiErrorResponses({
+    404: 'NO_SUBSCRIPTION_TO_RESUME — no scheduled cancellation exists.',
+  })
+  async resume(@CurrentUser() user: User) {
+    await this.payments.resumeSubscription(user.id);
+    const { plan, subscription } = await this.payments.getSubscription(user.id);
+    return new SubscriptionResponse(plan, subscription);
+  }
+
+  @Post('subscription/switch')
+  @HttpCode(200)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Switch an EXISTING subscription to a different plan',
+    description:
+      'For subscribers only — use this, never `/checkout`, to change plans ' +
+      '(checkout on an already-subscribed user 409s with ALREADY_SUBSCRIBED). ' +
+      'Upgrades apply immediately (prorated charge now, credit-gap granted now). ' +
+      'Downgrades are scheduled for the next renewal — you keep your current ' +
+      "plan's benefits until then; `pendingPlanKey` shows what's coming.",
+  })
+  @ApiDataResponse(
+    200,
+    SubscriptionResponse,
+    'planKey (upgrade) or pendingPlanKey (downgrade) reflects the switch.',
+  )
+  @ApiErrorResponses({
+    404: 'NO_ACTIVE_SUBSCRIPTION, or PLAN_NOT_PURCHASABLE for that plan/interval.',
+    409:
+      'ALREADY_SUBSCRIBED — already on the requested plan with nothing pending. ' +
+      '(Switching to the CURRENT plan while a downgrade IS pending is not an error — ' +
+      "it's treated as clear-pending-change and undoes the downgrade instead.)",
+  })
+  async switch(@CurrentUser() user: User, @Body() dto: SwitchPlanDto) {
+    await this.payments.switchPlan(user.id, dto.planKey, dto.interval);
+    const { plan, subscription } = await this.payments.getSubscription(user.id);
+    return new SubscriptionResponse(plan, subscription);
+  }
+
+  @Post('subscription/clear-pending-change')
+  @HttpCode(200)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Cancel a pending plan change (undo a scheduled downgrade)',
+    description:
+      'Releases the Stripe Subscription Schedule behind a pending downgrade and ' +
+      'returns to steady state on the current plan — the explicit path for "I changed ' +
+      'my mind about downgrading." Equivalent to calling Switch Plan with the plan ' +
+      "you're already on while a downgrade is pending.",
+  })
+  @ApiDataResponse(200, SubscriptionResponse, 'pendingPlanKey is now null.')
+  @ApiErrorResponses({
+    404: 'NO_ACTIVE_SUBSCRIPTION, or NO_SUBSCRIPTION_TO_RESUME if there is no pending plan change to cancel.',
+  })
+  async clearPendingChange(@CurrentUser() user: User) {
+    await this.payments.clearPendingChange(user.id);
     const { plan, subscription } = await this.payments.getSubscription(user.id);
     return new SubscriptionResponse(plan, subscription);
   }
