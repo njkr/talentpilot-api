@@ -7,11 +7,13 @@ import { CompanyService } from './company.service';
 import { CompanyController } from './company.controller';
 import { TavilyService } from './services/tavily.service';
 import { AiModule } from '../ai/ai.module';
+import { IntegrationCallsModule } from '../integration-calls/integration-calls.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([CompanyResearchCache, CompanyInsight, Workspace]),
     AiModule,
+    IntegrationCallsModule,
   ],
   controllers: [CompanyController],
   providers: [CompanyService, TavilyService],

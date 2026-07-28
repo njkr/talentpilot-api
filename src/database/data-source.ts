@@ -31,6 +31,10 @@ import { NotificationPreference } from '../notifications/entities/notification-p
 import { Plan } from '../payments/entities/plan.entity';
 import { Subscription } from '../payments/entities/subscription.entity';
 import { WebhookEvent } from '../payments/entities/webhook-event.entity';
+import { PaymentConfig } from '../payments/entities/payment-config.entity';
+import { CreditPack } from '../payments/entities/credit-pack.entity';
+import { Referral } from '../referrals/entities/referral.entity';
+import { IntegrationCall } from '../integration-calls/entities/integration-call.entity';
 
 // Single source of truth for the DB connection, shared by:
 //  - the Nest app (via TypeOrmModule.forRootAsync in app.module.ts)
@@ -73,6 +77,10 @@ export const dataSourceOptions: DataSourceOptions = {
     Plan,
     Subscription,
     WebhookEvent,
+    PaymentConfig,
+    CreditPack,
+    Referral,
+    IntegrationCall,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   synchronize: false, // migrations only — see Sprint 1 §2

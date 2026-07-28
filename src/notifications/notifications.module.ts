@@ -7,6 +7,7 @@ import { NotificationsController } from './notifications.controller';
 import { Notification } from './entities/notification.entity';
 import { NotificationPreference } from './entities/notification-preference.entity';
 import { User } from '../auth/entities/user.entity';
+import { IntegrationCallsModule } from '../integration-calls/integration-calls.module';
 
 // Imported by BOTH the API process (NotificationsController + NotificationsService.create()
 // enqueuing emails) and the worker (EmailProcessor actually consuming them, plus
@@ -18,6 +19,7 @@ import { User } from '../auth/entities/user.entity';
   imports: [
     BullModule.registerQueue({ name: 'emails' }),
     TypeOrmModule.forFeature([Notification, NotificationPreference, User]),
+    IntegrationCallsModule,
   ],
   controllers: [NotificationsController],
   providers: [EmailProcessor, NotificationsService], // the @Processor from §10 — runs in the WORKER process

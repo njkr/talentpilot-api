@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Env } from '../../config/config.module';
+import { IntegrationCallRecorderService } from '../../integration-calls/integration-call-recorder.service';
 
 export interface TavilyResult {
   title: string;
@@ -16,7 +17,10 @@ const RESULTS_PER_QUERY = 3;
 
 @Injectable()
 export class TavilyService {
-  constructor(private readonly env: Env) {}
+  constructor(
+    private readonly env: Env,
+    private readonly integrationCalls: IntegrationCallRecorderService,
+  ) {}
 
   /**
    * Grounding. Without real search results, the company_synthesis prompt would
@@ -49,23 +53,41 @@ export class TavilyService {
     query: string,
     maxResults: number,
   ): Promise<TavilyResult[]> {
-    const res = await fetch('https://api.tavily.com/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        api_key: this.env.get('TAVILY_API_KEY'),
-        query,
-        max_results: maxResults,
-        search_depth: 'basic',
-      }),
-      signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new Error(`Tavily ${res.status}`);
-    const data = (await res.json()) as TavilySearchResponse;
-    return data.results.map((r) => ({
-      title: r.title,
-      url: r.url,
-      content: r.content,
-    }));
+    const start = Date.now();
+    try {
+      const res = await fetch('https://api.tavily.com/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: this.env.get('TAVILY_API_KEY'),
+          query,
+          max_results: maxResults,
+          search_depth: 'basic',
+        }),
+        signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`Tavily ${res.status}`);
+      const data = (await res.json()) as TavilySearchResponse;
+      await this.integrationCalls.record({
+        provider: 'tavily',
+        operation: 'search',
+        success: true,
+        durationMs: Date.now() - start,
+      });
+      return data.results.map((r) => ({
+        title: r.title,
+        url: r.url,
+        content: r.content,
+      }));
+    } catch (err) {
+      await this.integrationCalls.record({
+        provider: 'tavily',
+        operation: 'search',
+        success: false,
+        errorType: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - start,
+      });
+      throw err;
+    }
   }
 }

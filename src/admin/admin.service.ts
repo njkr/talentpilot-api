@@ -91,6 +91,8 @@ export class AdminService {
         .createQueryBuilder('u')
         .select("DATE_TRUNC('day', u.createdAt)", 'day')
         .addSelect('COALESCE(SUM(u.costUsd), 0)', 'costUsd')
+        .addSelect('COUNT(*)', 'calls')
+        .addSelect('COUNT(*) FILTER (WHERE u.success = false)', 'errors')
         .where('u.createdAt >= :since', { since })
         .groupBy("DATE_TRUNC('day', u.createdAt)")
         .orderBy('day', 'ASC')

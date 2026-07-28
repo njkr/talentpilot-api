@@ -3,19 +3,25 @@ import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  type GetObjectCommandOutput,
   ListObjectsV2Command,
+  type ListObjectsV2CommandOutput,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Env } from 'src/config/config.module';
+import { IntegrationCallRecorderService } from '../integration-calls/integration-call-recorder.service';
 
 @Injectable()
 export class StorageService implements OnModuleInit {
   private client: S3Client;
   private bucket: string;
 
-  constructor(private readonly env: Env) {}
+  constructor(
+    private readonly env: Env,
+    private readonly integrationCalls: IntegrationCallRecorderService,
+  ) {}
 
   onModuleInit() {
     this.bucket = this.env.get('S3_BUCKET');
@@ -44,7 +50,7 @@ export class StorageService implements OnModuleInit {
   }
 
   async put(key: string, body: Buffer, contentType: string) {
-    await this.client.send(
+    await this.sendTracked(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
@@ -56,13 +62,15 @@ export class StorageService implements OnModuleInit {
           ServerSideEncryption: 'AES256' as const,
         }),
       }),
+      'PutObject',
     );
     return key;
   }
 
   async get(key: string): Promise<Buffer> {
-    const res = await this.client.send(
+    const res = await this.sendTracked<GetObjectCommandOutput>(
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      'GetObject',
     );
     return Buffer.from(await res.Body!.transformToByteArray());
   }
@@ -88,8 +96,9 @@ export class StorageService implements OnModuleInit {
   }
 
   async delete(key: string) {
-    await this.client.send(
+    await this.sendTracked(
       new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+      'DeleteObject',
     );
   }
 
@@ -97,22 +106,56 @@ export class StorageService implements OnModuleInit {
   async deletePrefix(prefix: string) {
     let token: string | undefined;
     do {
-      const list = await this.client.send(
+      const list = await this.sendTracked<ListObjectsV2CommandOutput>(
         new ListObjectsV2Command({
           Bucket: this.bucket,
           Prefix: prefix,
           ContinuationToken: token,
         }),
+        'ListObjectsV2',
       );
       if (list.Contents?.length) {
-        await this.client.send(
+        await this.sendTracked(
           new DeleteObjectsCommand({
             Bucket: this.bucket,
             Delete: { Objects: list.Contents.map((o) => ({ Key: o.Key! })) },
           }),
+          'DeleteObjects',
         );
       }
       token = list.NextContinuationToken;
     } while (token);
+  }
+
+  /**
+   * Every real network call to S3 goes through here instead of `client.send` directly, so it's
+   * automatically recorded — `getSignedUrl` deliberately does NOT (it's local signing, no
+   * network call, see its own doc comment above). A metering failure must never break a real
+   * upload/download; IntegrationCallRecorderService.record() already swallows its own errors.
+   */
+  private async sendTracked<T>(
+    command: { input: unknown } & Parameters<S3Client['send']>[0],
+    operation: string,
+  ): Promise<T> {
+    const start = Date.now();
+    try {
+      const result = await this.client.send(command);
+      await this.integrationCalls.record({
+        provider: 's3',
+        operation,
+        success: true,
+        durationMs: Date.now() - start,
+      });
+      return result as T;
+    } catch (err) {
+      await this.integrationCalls.record({
+        provider: 's3',
+        operation,
+        success: false,
+        errorType: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - start,
+      });
+      throw err;
+    }
   }
 }
