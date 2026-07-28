@@ -2297,6 +2297,48 @@
           }
         },
         {
+          "name": "Update Job Description",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/job-descriptions/{{jdId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "job-descriptions",
+                "{{jdId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company\": \"Acme Corp\",\n  \"position\": \"Senior Backend Engineer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Fills in whatever the AI parse (or upload, which has no fields to pass at ingest time) came up without — see `missingFields` on the JD response. Does not re-run analysis. Call this before triggering analyze() on a workspace so the pipeline has a company to research and a real position to write toward.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Retry JD Analysis",
           "request": {
             "method": "POST",
@@ -5832,14 +5874,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"planKey\": \"pro\"\n}",
+              "raw": "{\n  \"planKey\": \"pro\",\n  \"interval\": \"month\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "`planKey` is `pro` or `ultimate` (never `free` — that plan needs no checkout). Redirect the browser to the returned `url`; Stripe Checkout handles card entry. 404s if that plan has no `stripe_price_id` configured yet for this environment (see `STRIPE_PRICE_PRO`/`STRIPE_PRICE_ULTIMATE`). Requires a unique `Idempotency-Key` header (see the header row above).",
+            "description": "`planKey` is any active paid plan's key (Sprint 13: plans are now admin-created, so this is no longer restricted to `pro`/`ultimate` — an unknown or inactive key 404s instead of failing validation). `interval` is `month` or `year` (default `month`); a plan with no price configured for that interval 404s. Redirect the browser to the returned `url`. Requires a unique `Idempotency-Key` header (see the header row above). **An existing subscriber (real `stripeSubscriptionId` on an active/past_due row) gets a 409 `ALREADY_SUBSCRIBED` here** — they must use Switch Plan instead, which changes the same subscription's price line rather than creating a second one.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -5983,6 +6025,52 @@
               ],
               "cookie": [],
               "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"IDEMPOTENCY_KEY_REQUIRED\",\n    \"message\": \"Send a unique Idempotency-Key header with this request.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-22T09:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — already subscribed (use Switch Plan instead)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "{{$guid}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/checkout",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "checkout"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"planKey\": \"ultimate\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"ALREADY_SUBSCRIBED\",\n    \"message\": \"You already have an active subscription — use the switch-plan endpoint to change plans, not checkout.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-22T09:00:00.000Z\"\n  }\n}"
             }
           ]
         },
@@ -6001,7 +6089,7 @@
                 "subscription"
               ]
             },
-            "description": "Always resolves — a user with no Subscription row is reported as the free plan.",
+            "description": "Always resolves — a user with no Subscription row is reported as the free plan. `pendingPlanKey` is non-null only when a downgrade is scheduled (see Switch Plan below) — it's the plan you'll drop to at `currentPeriodEnd`, while `planKey` still reflects the higher plan you keep until then.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -6040,7 +6128,620 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"planKey\": \"free\",\n    \"planName\": \"Free\",\n    \"monthlyCredits\": 0,\n    \"maxResumes\": 3,\n    \"maxWorkspaces\": 3,\n    \"status\": \"active\",\n    \"currentPeriodEnd\": null,\n    \"cancelAtPeriodEnd\": false\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"planKey\": \"free\",\n    \"planName\": \"Free\",\n    \"monthlyCredits\": 0,\n    \"maxResumes\": 3,\n    \"maxWorkspaces\": 3,\n    \"status\": \"active\",\n    \"currentPeriodEnd\": null,\n    \"cancelAtPeriodEnd\": false,\n    \"pendingPlanKey\": null\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "200 OK — downgrade scheduled (pendingPlanKey set)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"planKey\": \"ultimate\",\n    \"planName\": \"Ultimate\",\n    \"monthlyCredits\": 1000,\n    \"maxResumes\": 50,\n    \"maxWorkspaces\": 50,\n    \"status\": \"active\",\n    \"currentPeriodEnd\": \"2026-08-21T20:00:00.000Z\",\n    \"cancelAtPeriodEnd\": false,\n    \"pendingPlanKey\": \"pro\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Cancel Subscription",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payments/subscription/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "subscription",
+                "cancel"
+              ]
+            },
+            "description": "Schedules cancellation at the end of the current billing period (`cancel_at_period_end: true` on the Stripe subscription) — never an immediate hard-cancel. You keep the plan and its benefits until `currentPeriodEnd`, then drop to free at the next renewal. An immediate cancel-with-refund is a different (refund) question, not this endpoint. Reversible via Resume Subscription below, right up until the period actually ends.\n\nIf a downgrade was scheduled (`pendingPlanKey` was set), cancelling releases that Stripe Subscription Schedule first and clears `pendingPlanKey` — cancelling supersedes any pending plan change. A downstream Stripe failure here maps to `SUBSCRIPTION_UPDATE_FAILED` (502), never a raw 500.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/cancel",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "cancel"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"planKey\": \"pro\",\n    \"planName\": \"Pro\",\n    \"monthlyCredits\": 200,\n    \"maxResumes\": 10,\n    \"maxWorkspaces\": 10,\n    \"status\": \"active\",\n    \"currentPeriodEnd\": \"2026-08-21T20:00:00.000Z\",\n    \"cancelAtPeriodEnd\": true,\n    \"pendingPlanKey\": null\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — no active subscription",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/cancel",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "cancel"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NO_ACTIVE_SUBSCRIPTION\",\n    \"message\": \"You have no active paid subscription.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "502 Bad Gateway — Stripe call failed",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/cancel",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "cancel"
+                  ]
+                }
+              },
+              "status": "Bad Gateway",
+              "code": 502,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"SUBSCRIPTION_UPDATE_FAILED\",\n    \"message\": \"We could not update your subscription. Please try again.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Resume Subscription",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payments/subscription/resume",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "subscription",
+                "resume"
+              ]
+            },
+            "description": "Undoes a scheduled cancellation (sets `cancel_at_period_end: false` back on the Stripe subscription) — a one-call fix for \"I changed my mind\", no re-subscribe/checkout needed. Only works while `cancelAtPeriodEnd` is still true; once the period actually ends and Stripe cancels the subscription for real, there's nothing left to resume.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/resume",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "resume"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"planKey\": \"pro\",\n    \"planName\": \"Pro\",\n    \"monthlyCredits\": 200,\n    \"maxResumes\": 10,\n    \"maxWorkspaces\": 10,\n    \"status\": \"active\",\n    \"currentPeriodEnd\": \"2026-08-21T20:00:00.000Z\",\n    \"cancelAtPeriodEnd\": false,\n    \"pendingPlanKey\": null\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — no scheduled cancellation to resume",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/resume",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "resume"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NO_SUBSCRIPTION_TO_RESUME\",\n    \"message\": \"You have no subscription with a scheduled cancellation to resume.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Switch Plan (Upgrade/Downgrade)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/subscription/switch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "subscription",
+                "switch"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planKey\": \"ultimate\",\n  \"interval\": \"month\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Switches an EXISTING subscriber to a different plan — one Stripe subscription, the price line swapped, never cancel-and-recreate (which would double-charge or leave a coverage gap). This is what `/payments/checkout` now redirects existing subscribers to (see its `ALREADY_SUBSCRIBED` response below).\n\n**Upgrade** (target plan's monthly price is higher than the current one): applied immediately — `proration_behavior: 'always_invoice'` charges the prorated difference right now, `planKey` flips immediately, and the credit-allotment GAP between the two plans (e.g. Ultimate's 1000 - Pro's 200 = 800) is granted right away so the upgrade feels instant instead of waiting for the next monthly refill.\n\n**Downgrade** (target plan is cheaper): deferred to the next renewal via a Stripe Subscription Schedule. You keep the current (higher) plan's benefits — already paid for — until `currentPeriodEnd`, at which point Stripe itself flips the price and a webhook finalizes `planKey` locally. `pendingPlanKey` on Get Subscription shows what's coming so the UI can say \"Changes to Pro on Aug 21\".\n\n**Undo a pending downgrade**: call this with `planKey` set to the plan you're CURRENTLY on (`sub.planKey`, not the pending one) while a downgrade is scheduled — that's treated as \"cancel the pending change,\" not a no-op, and releases the underlying Stripe Subscription Schedule. Equivalent to calling Clear Pending Plan Change directly.\n\n`interval` defaults to `month`. Switching to the plan you're already on with NOTHING pending 409s with `ALREADY_SUBSCRIBED`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — upgrade (applied immediately)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/switch",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "switch"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"planKey\": \"ultimate\",\n  \"interval\": \"month\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"planKey\": \"ultimate\",\n    \"planName\": \"Ultimate\",\n    \"monthlyCredits\": 1000,\n    \"maxResumes\": 50,\n    \"maxWorkspaces\": 50,\n    \"status\": \"active\",\n    \"currentPeriodEnd\": \"2026-08-21T20:00:00.000Z\",\n    \"cancelAtPeriodEnd\": false,\n    \"pendingPlanKey\": null\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "200 OK — downgrade (deferred to renewal)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/switch",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "switch"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"planKey\": \"pro\",\n  \"interval\": \"month\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"planKey\": \"ultimate\",\n    \"planName\": \"Ultimate\",\n    \"monthlyCredits\": 1000,\n    \"maxResumes\": 50,\n    \"maxWorkspaces\": 50,\n    \"status\": \"active\",\n    \"currentPeriodEnd\": \"2026-08-21T20:00:00.000Z\",\n    \"cancelAtPeriodEnd\": false,\n    \"pendingPlanKey\": \"pro\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — plan not purchasable for that interval",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/switch",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "switch"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"planKey\": \"ultimate\",\n  \"interval\": \"year\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"PLAN_NOT_PURCHASABLE\",\n    \"message\": \"Plan \\\"ultimate\\\" is not available for that billing interval.\",\n    \"details\": { \"planKey\": \"ultimate\" }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "200 OK — undo a pending downgrade (switch back to current plan)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/switch",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "switch"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"planKey\": \"ultimate\",\n  \"interval\": \"month\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"planKey\": \"ultimate\",\n    \"planName\": \"Ultimate\",\n    \"monthlyCredits\": 1000,\n    \"maxResumes\": 50,\n    \"maxWorkspaces\": 50,\n    \"status\": \"active\",\n    \"currentPeriodEnd\": \"2026-08-21T20:00:00.000Z\",\n    \"cancelAtPeriodEnd\": false,\n    \"pendingPlanKey\": null\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — already on this plan, nothing pending",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/switch",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "switch"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"planKey\": \"pro\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"ALREADY_SUBSCRIBED\",\n    \"message\": \"You're already on the \\\"pro\\\" plan.\",\n    \"details\": { \"planKey\": \"pro\" }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Clear Pending Plan Change",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payments/subscription/clear-pending-change",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "subscription",
+                "clear-pending-change"
+              ]
+            },
+            "description": "Cancels a pending plan change (a scheduled downgrade) — releases the Stripe Subscription Schedule behind it and returns to steady state on the current plan, with nothing pending. The explicit path for \"I changed my mind about downgrading\"; equivalent to calling Switch Plan with the plan you're already on while a downgrade is pending.\n\nThis is also the fix for a real deadlock: a subscription with a pending downgrade has a Stripe Subscription Schedule attached, and neither Cancel Subscription nor an unconditional \"already on this plan\" guard used to know how to release it — Cancel 500'd and Switch Plan rejected the request outright. Both now release the schedule via the same shared helper this endpoint uses.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/clear-pending-change",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "clear-pending-change"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"planKey\": \"ultimate\",\n    \"planName\": \"Ultimate\",\n    \"monthlyCredits\": 1000,\n    \"maxResumes\": 50,\n    \"maxWorkspaces\": 50,\n    \"status\": \"active\",\n    \"currentPeriodEnd\": \"2026-08-21T20:00:00.000Z\",\n    \"cancelAtPeriodEnd\": false,\n    \"pendingPlanKey\": null\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — no active subscription",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/clear-pending-change",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "clear-pending-change"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NO_ACTIVE_SUBSCRIPTION\",\n    \"message\": \"You have no active paid subscription.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — no pending plan change to cancel",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/payments/subscription/clear-pending-change",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "payments",
+                    "subscription",
+                    "clear-pending-change"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NO_SUBSCRIPTION_TO_RESUME\",\n    \"message\": \"There is no pending plan change to cancel.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
             }
           ]
         },
@@ -6177,6 +6878,122 @@
               "body": "{\n  \"received\": true\n}"
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Plans",
+      "item": [
+        {
+          "name": "List Active Plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/plans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "plans"
+              ]
+            },
+            "description": "No auth required — a logged-out visitor deciding whether to sign up needs to see pricing. Returns only plans with active=true, ordered by displayOrder."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Credit Packs",
+      "item": [
+        {
+          "name": "List Active Credit Packs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/credit-packs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "credit-packs"
+              ]
+            },
+            "description": "No auth required, same reasoning as GET /plans."
+          }
+        },
+        {
+          "name": "Buy a Credit Pack (Checkout)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "Required."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/credit-packs/{{packId}}/checkout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "credit-packs",
+                "{{packId}}",
+                "checkout"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "`mode: payment` — a one-time Stripe Checkout session, NOT a subscription. Requires a unique `Idempotency-Key` header, same pattern as POST /payments/checkout. 403s (FEATURE_DISABLED) if payment_config.credit_packs_enabled is false. 404s if the pack doesn't exist or isn't active."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Referrals",
+      "item": [
+        {
+          "name": "Get My Referral Code & Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/referrals/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "referrals",
+                "me"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Code is generated lazily on first request and then stable forever. shareUrl embeds it as a ?ref= query param for the registration page to pick up. stats.creditsEarned only counts REWARDED referrals — a referral sits at invited but not qualified until the referee hits the qualifying event configured in payment_config (first_analysis by default), not at signup."
+          }
         }
       ]
     },
@@ -6326,7 +7143,7 @@
                 "dashboard"
               ]
             },
-            "description": "One batched round-trip (credit balance, plan, resume/workspace counts, recent workspaces, unread notifications) — cached in Redis for 30s per user.",
+            "description": "One batched round-trip — credit balance, plan, resume/workspace counts, recent workspaces (now with each one's latest score), unread notifications, plus insight: a score trend/sparkline, a 30-day credit burn summary, the skills most often missing across all your reports, a 14-day activity heatmap, and a prioritized `actionItems` to-do list (failed runs, pending suggestions, low credits, an incomplete profile). Every addition is a single cheap indexed aggregate query in the same batch — still cached in Redis for 30s per user, still one round-trip.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -6364,7 +7181,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"creditBalance\": 87,\n    \"plan\": {\n      \"key\": \"free\",\n      \"name\": \"Free\",\n      \"status\": \"active\",\n      \"monthlyCredits\": 0\n    },\n    \"resumes\": {\n      \"count\": 2,\n      \"limit\": 3\n    },\n    \"workspaces\": {\n      \"total\": 4,\n      \"completed\": 3,\n      \"processing\": 1,\n      \"failed\": 0,\n      \"recent\": [\n        {\n          \"id\": \"{{workspaceId}}\",\n          \"name\": \"Acme — Backend Engineer\",\n          \"status\": \"completed\",\n          \"updatedAt\": \"2026-07-21T19:00:00.000Z\"\n        }\n      ]\n    },\n    \"unreadNotifications\": 3\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"creditBalance\": 2175,\n    \"plan\": {\n      \"key\": \"pro\",\n      \"name\": \"Pro\",\n      \"status\": \"active\",\n      \"monthlyCredits\": 200\n    },\n    \"resumes\": {\n      \"count\": 3,\n      \"limit\": 25\n    },\n    \"workspaces\": {\n      \"total\": 4,\n      \"completed\": 3,\n      \"processing\": 0,\n      \"failed\": 1,\n      \"recent\": [\n        {\n          \"id\": \"{{workspaceId}}\",\n          \"name\": \"Acme Corp — Senior Backend Engineer\",\n          \"status\": \"completed\",\n          \"updatedAt\": \"2026-07-27T14:23:36.291Z\",\n          \"score\": 64\n        },\n        {\n          \"id\": \"e96aaa32-3de0-4419-93a0-0a8df252bbfd\",\n          \"name\": \"Acme Corp — Senior Backend Engineer\",\n          \"status\": \"failed\",\n          \"updatedAt\": \"2026-07-24T02:29:58.371Z\",\n          \"score\": 73\n        },\n        {\n          \"id\": \"f2c552ae-6bb2-4514-82d5-82e0bbf9de2b\",\n          \"name\": \"Skyland — Unity Developer\",\n          \"status\": \"completed\",\n          \"updatedAt\": \"2026-07-24T02:29:31.204Z\",\n          \"score\": 23\n        }\n      ]\n    },\n    \"unreadNotifications\": 3,\n    \"scoreInsight\": {\n      \"latestScore\": 64,\n      \"averageScore\": 54,\n      \"bestScore\": 73,\n      \"trend\": [\n        { \"date\": \"2026-07-23\", \"score\": 57 },\n        { \"date\": \"2026-07-23\", \"score\": 23 },\n        { \"date\": \"2026-07-24\", \"score\": 73 },\n        { \"date\": \"2026-07-27\", \"score\": 64 }\n      ]\n    },\n    \"creditInsight\": {\n      \"balance\": 2175,\n      \"spentLast30Days\": 1265,\n      \"grantedLast30Days\": 3440,\n      \"monthlyAllowance\": 200,\n      \"runsRemaining\": 103\n    },\n    \"topGaps\": [\n      { \"keyword\": \"git\", \"missCount\": 2 },\n      { \"keyword\": \"chakra ui\", \"missCount\": 1 },\n      { \"keyword\": \"cypress\", \"missCount\": 1 },\n      { \"keyword\": \"dotween\", \"missCount\": 1 },\n      { \"keyword\": \"c#\", \"missCount\": 1 }\n    ],\n    \"activity\": [\n      { \"date\": \"2026-07-14\", \"runs\": 0 },\n      { \"date\": \"2026-07-15\", \"runs\": 0 },\n      { \"date\": \"2026-07-16\", \"runs\": 0 },\n      { \"date\": \"2026-07-17\", \"runs\": 0 },\n      { \"date\": \"2026-07-18\", \"runs\": 0 },\n      { \"date\": \"2026-07-19\", \"runs\": 0 },\n      { \"date\": \"2026-07-20\", \"runs\": 0 },\n      { \"date\": \"2026-07-21\", \"runs\": 0 },\n      { \"date\": \"2026-07-22\", \"runs\": 0 },\n      { \"date\": \"2026-07-23\", \"runs\": 3 },\n      { \"date\": \"2026-07-24\", \"runs\": 0 },\n      { \"date\": \"2026-07-25\", \"runs\": 0 },\n      { \"date\": \"2026-07-26\", \"runs\": 0 },\n      { \"date\": \"2026-07-27\", \"runs\": 1 }\n    ],\n    \"attention\": {\n      \"failedRuns\": 1,\n      \"workspacesWithPendingSuggestions\": 2\n    },\n    \"actionItems\": [\n      {\n        \"kind\": \"failed_run\",\n        \"priority\": \"high\",\n        \"label\": \"1 analysis run failed — retry available\",\n        \"href\": \"/workspaces?filter=failed\"\n      },\n      {\n        \"kind\": \"pending_suggestions\",\n        \"priority\": \"medium\",\n        \"label\": \"2 workspaces have suggestions to review\",\n        \"href\": \"/workspaces\"\n      },\n      {\n        \"kind\": \"incomplete_profile\",\n        \"priority\": \"low\",\n        \"label\": \"Complete your profile (33%) for better tailoring\",\n        \"href\": \"/settings\"\n      }\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-27T18:05:58.530Z\"\n  }\n}"
             }
           ]
         }
@@ -6795,7 +7612,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"since\": \"2026-06-21T20:00:00.000Z\",\n    \"byFeature\": [\n      {\n        \"feature\": \"resume_extraction\",\n        \"costUsd\": \"1.234500\",\n        \"calls\": \"412\"\n      }\n    ],\n    \"byDay\": [\n      {\n        \"day\": \"2026-07-21T00:00:00.000Z\",\n        \"costUsd\": \"0.081200\"\n      }\n    ],\n    \"topUsers\": [\n      {\n        \"userId\": \"{{userId}}\",\n        \"costUsd\": \"0.412300\"\n      }\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"since\": \"2026-06-21T20:00:00.000Z\",\n    \"byFeature\": [\n      {\n        \"feature\": \"resume_extraction\",\n        \"costUsd\": \"1.234500\",\n        \"calls\": \"412\"\n      }\n    ],\n    \"byDay\": [\n      {\n        \"day\": \"2026-07-21T00:00:00.000Z\",\n        \"costUsd\": \"0.081200\",\n        \"calls\": \"39\",\n        \"errors\": \"0\"\n      }\n    ],\n    \"topUsers\": [\n      {\n        \"userId\": \"{{userId}}\",\n        \"costUsd\": \"0.412300\"\n      }\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
             }
           ]
         },
@@ -7011,6 +7828,929 @@
       ]
     },
     {
+      "name": "Admin — Plans",
+      "item": [
+        {
+          "name": "List All Plans (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/plans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "plans"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Includes inactive/archived plans — GET /plans (public) does not."
+          }
+        },
+        {
+          "name": "Create Plan (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/plans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "plans"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"pro-annual\",\n  \"name\": \"Pro (Annual)\",\n  \"description\": \"Everything in Pro, billed yearly at a discount.\",\n  \"priceMonthlyCents\": 1900,\n  \"priceYearlyCents\": 18000,\n  \"monthlyCredits\": 200,\n  \"limits\": {\n    \"maxResumes\": 25,\n    \"maxWorkspaces\": 100,\n    \"regenPerDay\": -1\n  },\n  \"displayOrder\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Creates the matching Stripe product + price(s) automatically (StripeSyncService). `limits.regenPerDay` is stored but not yet enforced anywhere."
+          }
+        },
+        {
+          "name": "Update Plan (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/plans/{{planId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "plans",
+                "{{planId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceMonthlyCents\": 2400\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "⚠️ A price change does NOT modify the existing Stripe Price (Prices are immutable) — it creates a brand-new Price at the new amount, points this plan at it, and archives the old one. Any subscriber already on the old price keeps being billed at their original rate; only new checkouts see the new price."
+          }
+        },
+        {
+          "name": "Archive Plan (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/plans/{{planId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "plans",
+                "{{planId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Never hard-deleted. Archives the Stripe product + every price, and sets active=false, hiding it from GET /plans and new checkouts — existing subscribers keep billing normally."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin — Credit Packs",
+      "item": [
+        {
+          "name": "List All Credit Packs (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/credit-packs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "credit-packs"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Includes inactive packs."
+          }
+        },
+        {
+          "name": "Create Credit Pack (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/credit-packs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "credit-packs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Small pack\",\n  \"credits\": 100,\n  \"priceCents\": 500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Creates the matching one-time Stripe price (no `recurring` block) automatically."
+          }
+        },
+        {
+          "name": "Update Credit Pack (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/credit-packs/{{packId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "credit-packs",
+                "{{packId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceCents\": 900\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Same immutable-price rule as plans: a priceCents change creates a NEW Stripe price and archives the old one."
+          }
+        },
+        {
+          "name": "Archive Credit Pack (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/credit-packs/{{packId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "credit-packs",
+                "{{packId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Never hard-deleted — archives the Stripe product + price and sets active=false."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin — Payment Config",
+      "item": [
+        {
+          "name": "Get Payment Config (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/payment-config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "payment-config"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The live, admin-editable singleton row every credit cost and referral/signup grant reads from — analyzeCost, coverLetterRegenCost, interviewFeedbackCost, signupCreditGrant, referrerReward, refereeReward, referralQualifyingEvent, maxReferralRewardsPerUser, referralsEnabled, creditPacksEnabled."
+          }
+        },
+        {
+          "name": "Update Payment Config (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/payment-config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "payment-config"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"analyzeCost\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Only send the fields you want to change. Reads are cached for 60s (PaymentConfigService), so a change can take up to a minute to reach an in-flight request — the editing admin's own next read is always fresh (the cache is busted immediately on write). Writes an audit row."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin — Referrals",
+      "item": [
+        {
+          "name": "List All Referrals (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/referrals?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "referrals?limit=20"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Cursor-paginated, newest first — same pattern as GET /admin/audit."
+          }
+        },
+        {
+          "name": "Referral Global Stats (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/referrals/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "referrals",
+                "stats"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "totalCreditsPaid = totalQualified × (referrerReward + refereeReward) from the current payment_config — historical if the config has changed since some of those were paid out."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin — Integrations",
+      "item": [
+        {
+          "name": "Integrations Overview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/integrations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "integrations"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Last-24h call/error counts for every third-party integration (openai, resend, tavily, stripe, s3). Only `openai` carries a `costUsd` field — the other four are tracked in `integration_calls`, which has no per-call cost. Historical stats only, no live reachability ping."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/integrations",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "integrations"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"since\": \"2026-07-27T14:03:28.870Z\",\n    \"providers\": [\n      {\n        \"provider\": \"openai\",\n        \"calls\": 43,\n        \"errors\": 0,\n        \"costUsd\": \"0.154648\"\n      },\n      {\n        \"provider\": \"resend\",\n        \"calls\": 2,\n        \"errors\": 0\n      },\n      {\n        \"provider\": \"tavily\",\n        \"calls\": 4,\n        \"errors\": 0\n      },\n      {\n        \"provider\": \"stripe\",\n        \"calls\": 1,\n        \"errors\": 0\n      },\n      {\n        \"provider\": \"s3\",\n        \"calls\": 2,\n        \"errors\": 0\n      }\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-28T14:03:28.903Z\"\n  }\n}"
+            },
+            {
+              "name": "403 Forbidden — not an admin",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/integrations",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "integrations"
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"FORBIDDEN\",\n    \"message\": \"Admin access required.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T20:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Integration Daily History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/integrations/openai/daily?days=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "integrations",
+                "openai",
+                "daily"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "30"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Per-day call/error/cost history for ONE provider. `openai` shown here, but the path segment can be any of: openai, resend, tavily, stripe, s3 (400 on anything else). Note: unlike the overview endpoint, `calls`/`errors`/`costUsd` here come straight off a raw SQL aggregate and are returned as strings, not numbers."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/integrations/openai/daily?days=30",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "integrations",
+                    "openai",
+                    "daily"
+                  ],
+                  "query": [
+                    {
+                      "key": "days",
+                      "value": "30"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"provider\": \"openai\",\n    \"since\": \"2026-07-21T13:52:11.166Z\",\n    \"days\": [\n      {\n        \"day\": \"2026-07-21T00:00:00.000Z\",\n        \"calls\": \"4\",\n        \"errors\": \"0\",\n        \"costUsd\": \"0.001359\"\n      },\n      {\n        \"day\": \"2026-07-22T00:00:00.000Z\",\n        \"calls\": \"6\",\n        \"errors\": \"0\",\n        \"costUsd\": \"0.003749\"\n      },\n      {\n        \"day\": \"2026-07-23T00:00:00.000Z\",\n        \"calls\": \"89\",\n        \"errors\": \"0\",\n        \"costUsd\": \"0.422624\"\n      }\n    ]\n  },\n  \"meta\": {\n    \"requestId\": \"cc78f301-51f9-44e3-9112-6cfa4e42c89c\",\n    \"timestamp\": \"2026-07-28T13:52:11.178Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request — unknown provider",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/integrations/bogus/daily",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "integrations",
+                    "bogus",
+                    "daily"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"Validation failed.\",\n    \"fields\": {\n      \"Unknown\": [\n        \"Unknown provider \\\"bogus\\\". Valid: openai, resend, tavily, stripe, s3\"\n      ]\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"f0309cfa-a5c0-4af4-93f1-de3073996f11\",\n    \"timestamp\": \"2026-07-28T14:39:34.353Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin — Users",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Cursor-paginated user list. Each row carries lifetime + windowed (`?days=`, default 30) AI spend, resume/cover-letter counts, referral stats, and current plan. Optional `search` (email substring) and `status` (active|suspended|deleted) filters."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/users?limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "users"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"8f14e45f-ceea-467e-bd97-37e33f8a2e9c\",\n      \"email\": \"jane.doe@example.com\",\n      \"role\": \"user\",\n      \"status\": \"active\",\n      \"isVerified\": true,\n      \"createdAt\": \"2026-07-20T10:15:00.000Z\",\n      \"lastLoginAt\": \"2026-07-28T09:30:00.000Z\",\n      \"planKey\": \"pro\",\n      \"planName\": \"Pro\",\n      \"totalSpendUsd\": \"2.348900\",\n      \"spendLastNDaysUsd\": \"0.512300\",\n      \"resumeCount\": 3,\n      \"coverLetterCount\": 5,\n      \"referrals\": { \"invited\": 2, \"qualified\": 1 }\n    },\n    {\n      \"id\": \"3c9e0d1a-6b4f-4a2e-9c3d-1f2e3d4c5b6a\",\n      \"email\": \"sam.taylor@example.com\",\n      \"role\": \"user\",\n      \"status\": \"active\",\n      \"isVerified\": false,\n      \"createdAt\": \"2026-07-27T08:00:00.000Z\",\n      \"lastLoginAt\": null,\n      \"planKey\": \"free\",\n      \"planName\": \"Free\",\n      \"totalSpendUsd\": \"0\",\n      \"spendLastNDaysUsd\": \"0\",\n      \"resumeCount\": 0,\n      \"coverLetterCount\": 0,\n      \"referrals\": { \"invited\": 0, \"qualified\": 0 }\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-28T14:00:00.000Z\",\n    \"nextCursor\": null,\n    \"hasMore\": false\n  }\n}"
+            },
+            {
+              "name": "200 OK — filtered (search + status)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/users?search=jane&status=suspended",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "users"
+                  ],
+                  "query": [
+                    {
+                      "key": "search",
+                      "value": "jane"
+                    },
+                    {
+                      "key": "status",
+                      "value": "suspended"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"8f14e45f-ceea-467e-bd97-37e33f8a2e9c\",\n      \"email\": \"jane.doe@example.com\",\n      \"role\": \"user\",\n      \"status\": \"suspended\",\n      \"isVerified\": true,\n      \"createdAt\": \"2026-07-20T10:15:00.000Z\",\n      \"lastLoginAt\": \"2026-07-28T09:30:00.000Z\",\n      \"planKey\": \"pro\",\n      \"planName\": \"Pro\",\n      \"totalSpendUsd\": \"2.348900\",\n      \"spendLastNDaysUsd\": \"0.512300\",\n      \"resumeCount\": 3,\n      \"coverLetterCount\": 5,\n      \"referrals\": { \"invited\": 2, \"qualified\": 1 }\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-28T14:00:00.000Z\",\n    \"nextCursor\": null,\n    \"hasMore\": false\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Suspend User",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/suspend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "suspend"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Revokes access (status → suspended). Blocks login and token refresh — but an already-issued access token stays valid until it naturally expires (JWT_ACCESS_TTL), so this is not instantaneous. Audit-logged as `admin.user.suspend`. An admin cannot suspend their own account (400 SELF_ACTION_FORBIDDEN)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/users/{{userId}}/suspend",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "users",
+                    "{{userId}}",
+                    "suspend"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": { \"status\": \"suspended\" },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-28T14:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request — cannot suspend yourself",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/users/{{userId}}/suspend",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "users",
+                    "{{userId}}",
+                    "suspend"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"SELF_ACTION_FORBIDDEN\",\n    \"message\": \"You cannot revoke your own admin access.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-28T14:00:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/users/{{userId}}/suspend",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "users",
+                    "{{userId}}",
+                    "suspend"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"User not found.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-28T14:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Activate User",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "activate"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Grants/restores access (status → active). Audit-logged as `admin.user.activate`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/users/{{userId}}/activate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "users",
+                    "{{userId}}",
+                    "activate"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": { \"status\": \"active\" },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-28T14:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "GDPR",
       "item": [
         {
@@ -7177,6 +8917,16 @@
     },
     {
       "key": "jobId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "planId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "packId",
       "value": "",
       "type": "string"
     }
