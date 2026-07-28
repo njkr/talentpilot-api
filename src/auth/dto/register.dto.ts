@@ -4,8 +4,9 @@ import {
   MinLength,
   MaxLength,
   Matches,
+  IsOptional,
 } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterDto {
   @ApiProperty({
@@ -31,4 +32,15 @@ export class RegisterDto {
   @Matches(/[A-Za-z]/, { message: 'password must contain a letter' })
   @Matches(/\d/, { message: 'password must contain a number' })
   password: string;
+
+  @ApiPropertyOptional({
+    example: 'ABCD234',
+    description:
+      "Another user's referral code (see GET /referrals/me). Invalid or unknown " +
+      'codes are ignored silently — a bad code must never block registration.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  referralCode?: string;
 }

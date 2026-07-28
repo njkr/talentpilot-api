@@ -40,6 +40,14 @@ export class User {
   @Column({ name: 'token_version', default: 0 })
   tokenVersion: number;
 
+  // Generated lazily on first request (ReferralsService.getMyCode), not at signup —
+  // most users never share theirs, so most rows never need one.
+  @Column({ name: 'referral_code', unique: true, nullable: true })
+  referralCode: string | null;
+  // Who referred this user in, if anyone — set once, at signup, never changed.
+  @Column({ name: 'referred_by', type: 'uuid', nullable: true })
+  referredBy: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })

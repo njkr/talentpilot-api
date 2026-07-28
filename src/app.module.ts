@@ -24,8 +24,10 @@ import { CompanyModule } from './company/company.module';
 import { SalaryModule } from './salary/salary.module';
 import { DocumentsModule } from './documents/documents.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ReferralsModule } from './referrals/referrals.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AdminModule } from './admin/admin.module';
+import { AdminPaymentsModule } from './admin/admin-payments.module';
 import { GdprModule } from './gdpr/gdpr.module';
 import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
@@ -74,8 +76,10 @@ import { dataSourceOptions } from './database/data-source';
     SalaryModule,
     DocumentsModule,
     PaymentsModule,
+    ReferralsModule,
     DashboardModule,
     AdminModule,
+    AdminPaymentsModule,
     GdprModule,
     HealthModule,
   ],

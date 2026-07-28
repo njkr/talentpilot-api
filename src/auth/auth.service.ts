@@ -52,7 +52,16 @@ export class AuthService {
     // the module wiring that connects the two is in §11.5.
     // Why an event instead of calling the email service directly: registration must not
     // fail because Resend is down, and AuthService must not know that audit logs exist.
-    this.events.emit('user.registered', { user, code, ctx });
+    // Same reasoning extends to referralCode (Sprint 13): AuthService must not know
+    // referrals exist either — CreditsListener grants the signup bonus and
+    // ReferralsListener records the referral, both off this one event, both wrapped
+    // so neither can fail registration itself.
+    this.events.emit('user.registered', {
+      user,
+      code,
+      ctx,
+      referralCode: dto.referralCode,
+    });
     return user; // controller maps to UserResponse
   }
 
