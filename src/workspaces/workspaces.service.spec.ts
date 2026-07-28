@@ -24,6 +24,9 @@ function build() {
   const planLimits = {
     assertCanCreateWorkspace: jest.fn().mockResolvedValue(undefined),
   };
+  const paymentConfig = {
+    get: jest.fn().mockResolvedValue({ analyzeCost: 21 }),
+  };
   const dataSource = { transaction: jest.fn() };
 
   const service = new WorkspacesService(
@@ -37,6 +40,7 @@ function build() {
     jdsService as any,
     credits as any,
     planLimits as any,
+    paymentConfig as any,
     dataSource as any,
   );
   return {

@@ -7,6 +7,9 @@ function build() {
   const balance = jest.fn().mockResolvedValue(10);
   const debit = jest.fn().mockResolvedValue(undefined);
   const credits = { balance, debit } as any;
+  const paymentConfig = {
+    get: jest.fn().mockResolvedValue({ interviewFeedbackCost: 1 }),
+  } as any;
   const questions = {
     findOne: jest.fn(),
     findOneOrFail: jest.fn(),
@@ -21,6 +24,7 @@ function build() {
     ai,
     chunker,
     credits,
+    paymentConfig,
     questions as any,
     workspaces as any,
   );
