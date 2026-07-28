@@ -5,6 +5,7 @@ import { Workspace } from '../workspaces/entities/workspace.entity';
 import { CreditsModule } from '../credits/credits.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PaymentConfigModule } from '../payments/config/payment-config.module';
 import { DashboardService } from './dashboard.service';
 import { DashboardController } from './dashboard.controller';
 
@@ -14,6 +15,7 @@ import { DashboardController } from './dashboard.controller';
     CreditsModule,
     PaymentsModule,
     NotificationsModule,
+    PaymentConfigModule,
   ],
   controllers: [DashboardController],
   providers: [DashboardService],
