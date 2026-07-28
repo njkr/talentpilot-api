@@ -104,4 +104,250 @@ describe('FabricationGuardService', () => {
     );
     expect(result.safe).toBe(true);
   });
+
+  // ── Real failure found live: a cover letter for a resume listing "Certifications:
+  // AWS Cloud Practitioner." (no institution, no issuer, and the word "certified"
+  // never appears anywhere) was rejected on 9 consecutive generation attempts
+  // because GPT-4o correctly used the credential's real/official name, "AWS
+  // Certified Cloud Practitioner" — tripping both the organisation check (the exact
+  // phrase isn't in the source) and the credential-language check (the word
+  // "certified" isn't in the source) for a certification the candidate genuinely
+  // holds. knownCertifications (5th arg) is the fix.
+  describe('knownCertifications', () => {
+    it('⚠️ accepts the credential\'s real/official name even though the resume shorthands it without "Certified" (the live bug)', () => {
+      const result = guard.check(
+        'As an AWS Certified Cloud Practitioner, I bring hands-on cloud experience.',
+        'Certifications: AWS Cloud Practitioner.',
+        [], // no employer/institution/issuer known — this resume has none
+        [],
+        ['AWS Cloud Practitioner'],
+      );
+      expect(result.safe).toBe(true);
+    });
+
+    it('without knownCertifications, the same text is flagged (proves the fix is load-bearing, not incidental)', () => {
+      const result = guard.check(
+        'As an AWS Certified Cloud Practitioner, I bring hands-on cloud experience.',
+        'Certifications: AWS Cloud Practitioner.',
+        [],
+      );
+      expect(result.safe).toBe(false);
+    });
+
+    it('still flags a credential with no relation to any known certification', () => {
+      const result = guard.check(
+        'I am a Certified Kubernetes Administrator with production experience.',
+        'Certifications: AWS Cloud Practitioner.',
+        [],
+        [],
+        ['AWS Cloud Practitioner'],
+      );
+      expect(result.safe).toBe(false);
+      expect(result.violations.some((v) => v.includes('credential'))).toBe(
+        true,
+      );
+    });
+
+    it('still flags a wholly unrelated organisation even with a known certification present', () => {
+      const result = guard.check(
+        'I previously consulted for Goldman Sachs on cloud migrations.',
+        'Certifications: AWS Cloud Practitioner.',
+        [],
+        [],
+        ['AWS Cloud Practitioner'],
+      );
+      expect(result.safe).toBe(false);
+      expect(result.violations.some((v) => v.includes('Goldman Sachs'))).toBe(
+        true,
+      );
+    });
+  });
+
+  // ── Real failure found live: a cover letter containing "REST APIs" — plain tech
+  // jargon, not a claim about any organisation — was rejected as an "unrecognised
+  // organisation" because both words happen to be capitalised. isTechJargon() is
+  // the fix: a phrase built ENTIRELY from common tech acronyms is exempt from the
+  // organisation check, but a real fabricated/misspelled org name in the SAME
+  // letter must still be caught.
+  describe('tech jargon exemption', () => {
+    it('⚠️ does not flag "REST APIs" as an unrecognised organisation (the live bug)', () => {
+      const result = guard.check(
+        'I have built REST APIs and scalable backend systems for years.',
+        'Full Stack Developer with experience building backend systems.',
+        [],
+      );
+      expect(result.safe).toBe(true);
+    });
+
+    it('other common tech acronym phrases are also exempt (CI/CD, SQL Server, JSON APIs)', () => {
+      for (const phrase of [
+        'I have hands-on experience with CI CD pipelines.',
+        'Strong background in SQL databases and JSON APIs.',
+      ]) {
+        const result = guard.check(
+          phrase,
+          'Full Stack Developer with backend experience.',
+          [],
+        );
+        expect(result.safe).toBe(true);
+      }
+    });
+
+    it('a phrase mixing a tech acronym with a real fabricated name is still flagged (not every word needs to be jargon)', () => {
+      const result = guard.check(
+        'I led the API integration project at Wayne Enterprises.',
+        'Full Stack Developer with backend experience.',
+        [],
+      );
+      expect(result.safe).toBe(false);
+      expect(
+        result.violations.some((v) => v.includes('Wayne Enterprises')),
+      ).toBe(true);
+    });
+  });
+
+  // ── Real failure found live: the JD's company name ("manaran") never appears
+  // anywhere in the JD's own body text — only in the structured `company` field —
+  // so the model had nothing to anchor its spelling against and wrote "Mannaran"
+  // (one inserted letter). wordsMatch()'s edit-distance tolerance is the fix.
+  describe('spelling-variation tolerance', () => {
+    it('⚠️ accepts a one-letter-typo variation of a known/allowed org (the live bug: "Mannaran" for "manaran")', () => {
+      const result = guard.check(
+        'Greetings to the Mannaran Company Hiring Team, I have built REST APIs for years.',
+        'Full Stack Developer with backend experience.',
+        [],
+        ['manaran'],
+      );
+      expect(result.safe).toBe(true);
+    });
+
+    it("still flags a wholly different fabricated organisation alongside the correctly-typo'd real one", () => {
+      const result = guard.check(
+        'Greetings to the Mannaran Company Hiring Team — I previously consulted for Blackwood Capital Partners.',
+        'Full Stack Developer with backend experience.',
+        [],
+        ['manaran'],
+      );
+      expect(result.safe).toBe(false);
+      expect(
+        result.violations.some((v) => v.includes('Blackwood Capital')),
+      ).toBe(true);
+      expect(result.violations.some((v) => v.includes('Mannaran'))).toBe(false);
+    });
+
+    it('does NOT fuzzy-match short (<=3 letter) words — a typo on a short acronym could coincidentally be a different real name', () => {
+      // "IBM" vs "ITM" is a 1-edit difference but both are plausible real orgs —
+      // short words must match exactly, not fuzzily. A single-word known org
+      // isolates this: with a longer org name, overlap on the OTHER words could
+      // pass the 50% threshold on its own regardless of the short word.
+      const result = guard.check(
+        'Greetings to the ITM Hiring Team, excited about this role.',
+        'Full Stack Developer with backend experience.',
+        [],
+        ['IBM'],
+      );
+      expect(result.safe).toBe(false);
+    });
+
+    it('does not tolerate a wholly different word of similar length (edit distance is still bounded)', () => {
+      const result = guard.check(
+        'I previously worked with Zambezi Corporation on a similar project.',
+        'Full Stack Developer with backend experience.',
+        [],
+        ['manaran'],
+      );
+      expect(result.safe).toBe(false);
+    });
+  });
+
+  // ── Randomized coverage across varied resume/cover-letter shapes, per the request
+  // to test cover letter generation with "random data" rather than one fixed
+  // fixture — the live bugs above were each found on a SPECIFIC resume shape a
+  // hand-picked fixture wouldn't necessarily reproduce.
+  describe('randomized resume/cover-letter combinations', () => {
+    const COMPANIES = [
+      'Acme Corp',
+      'Globex',
+      'Initech',
+      'Umbrella Inc',
+      'manaran',
+    ];
+    const CERTS = [
+      'AWS Cloud Practitioner',
+      'PMP',
+      'Scrum Master',
+      'Google Cloud Associate Engineer',
+    ];
+    const TECH_PHRASES = [
+      'REST APIs',
+      'CI CD pipelines',
+      'SQL databases',
+      'JSON payloads',
+      'HTML and CSS',
+    ];
+    const JD_COMPANIES = ['Stripe', 'Notion', 'Figma', 'Vercel', 'manaran'];
+
+    function pick<T>(arr: T[], seed: number): T {
+      return arr[seed % arr.length];
+    }
+
+    // 20 pseudo-random combinations (deterministic across runs via a simple seed,
+    // so a failure is always reproducible) covering every company/cert/phrase pair.
+    const cases = Array.from({ length: 20 }, (_, i) => ({
+      company: pick(COMPANIES, i),
+      cert: pick(CERTS, i * 3 + 1),
+      techPhrase: pick(TECH_PHRASES, i * 7 + 2),
+      jdCompany: pick(JD_COMPANIES, i * 5 + 3),
+    }));
+
+    it.each(cases)(
+      'accepts a clean letter built only from real resume facts + tech jargon + the JD company (case %#: $company / $cert / $techPhrase / $jdCompany)',
+      ({ company, cert, techPhrase, jdCompany }) => {
+        const resume = `Experience: Software Engineer at ${company}. Certifications: ${cert}.`;
+        const letter =
+          `Dear ${jdCompany} Hiring Team, as a Software Engineer at ${company} ` +
+          `I have hands-on experience with ${techPhrase} and hold a ${cert} certification.`;
+
+        const result = guard.check(
+          letter,
+          resume,
+          [company],
+          [jdCompany],
+          [cert],
+        );
+
+        expect(result.safe).toBe(true);
+      },
+    );
+
+    it.each(cases)(
+      'still flags a fabricated org injected into the same clean letter (case %#)',
+      ({ company, cert, techPhrase }) => {
+        const resume = `Experience: Software Engineer at ${company}. Certifications: ${cert}.`;
+        const letter =
+          `As a Software Engineer at ${company}, I previously consulted for ` +
+          `Blackwood Capital Partners and have experience with ${techPhrase}.`;
+
+        const result = guard.check(letter, resume, [company], [], [cert]);
+
+        expect(result.safe).toBe(false);
+        expect(
+          result.violations.some((v) => v.includes('Blackwood Capital')),
+        ).toBe(true);
+      },
+    );
+
+    it.each(cases)(
+      'still flags a fabricated number injected into the same clean letter (case %#)',
+      ({ company, cert }) => {
+        const resume = `Experience: Software Engineer at ${company}. Certifications: ${cert}.`;
+        const letter = `At ${company} I improved system performance by 73%.`;
+
+        const result = guard.check(letter, resume, [company]);
+
+        expect(result.safe).toBe(false);
+        expect(result.violations.some((v) => v.includes('73%'))).toBe(true);
+      },
+    );
+  });
 });

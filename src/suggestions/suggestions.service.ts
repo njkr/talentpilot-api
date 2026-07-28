@@ -75,13 +75,22 @@ export class SuggestionsService {
     });
 
     const knownOrgs = this.guard.collectKnownOrgs(ctx.sections);
+    const knownCertifications = this.guard.collectKnownCertifications(
+      ctx.sections,
+    );
     const sourceText = ctx.resume.rawText ?? '';
     const accepted: Array<Partial<AiSuggestion>> = [];
     let dropped = 0;
 
     for (const s of out.suggestions) {
       // ── Guard 1: fabrication ──
-      const check = this.guard.check(s.newText, sourceText, knownOrgs);
+      const check = this.guard.check(
+        s.newText,
+        sourceText,
+        knownOrgs,
+        [],
+        knownCertifications,
+      );
       if (!check.safe) {
         dropped++;
         continue;

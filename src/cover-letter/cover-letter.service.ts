@@ -12,6 +12,7 @@ import { ResumeSection } from '../resumes/entities/resume-section.entity';
 import { JobDescription } from '../job-descriptions/entities/job-description.entity';
 import { ChunkerService } from '../embeddings/services/chunker.service';
 import { CreditService } from '../credits/credit.service';
+import { PaymentConfigService } from '../payments/config/payment-config.service';
 import { Problems } from '../common/problems';
 import { renderJdSummary } from '../job-descriptions/utils/render-jd.util';
 import { FabricationGuardService } from '../suggestions/services/fabrication-guard.service';
@@ -21,8 +22,6 @@ const WORDS: Record<'short' | 'standard' | 'long', number> = {
   standard: 300,
   long: 450,
 };
-
-const REGENERATE_CREDIT_COST = 2;
 
 export interface CoverLetterContext {
   userId: string;
@@ -44,6 +43,7 @@ export class CoverLetterService {
     private readonly ai: AiService,
     private readonly chunker: ChunkerService,
     private readonly credits: CreditService,
+    private readonly paymentConfig: PaymentConfigService,
     private readonly guard: FabricationGuardService,
     @InjectRepository(CoverLetter)
     private readonly letters: Repository<CoverLetter>,
@@ -114,11 +114,15 @@ export class CoverLetterService {
     // tripped extractCapitalisedPhrases() and got rejected as an "unrecognised
     // organisation" — a real bug, not company-less-JD-specific.
     const knownOrgs = this.guard.collectKnownOrgs(ctx.sections);
+    const knownCertifications = this.guard.collectKnownCertifications(
+      ctx.sections,
+    );
     const check = this.guard.check(
       out.content,
       ctx.resume.rawText ?? '',
       knownOrgs,
       [ctx.jd.company ?? '', ctx.jd.position ?? ''],
+      knownCertifications,
     );
     if (!check.safe) {
       throw Problems.aiOutputInvalid();
@@ -188,16 +192,17 @@ export class CoverLetterService {
     userId: string,
     opts: CoverLetterOpts = {},
   ): Promise<CoverLetter> {
+    const regenCost = (await this.paymentConfig.get()).coverLetterRegenCost;
     const balance = await this.credits.balance(userId);
-    if (balance < REGENERATE_CREDIT_COST) {
-      throw Problems.insufficientCredits(REGENERATE_CREDIT_COST, balance);
+    if (balance < regenCost) {
+      throw Problems.insufficientCredits(regenCost, balance);
     }
 
     const ctx = await this.hydrate(workspaceId, userId);
     const letter = await this.generate(ctx, opts);
     await this.credits.debit(
       userId,
-      REGENERATE_CREDIT_COST,
+      regenCost,
       'cover_letter_regenerate',
       workspaceId,
     );

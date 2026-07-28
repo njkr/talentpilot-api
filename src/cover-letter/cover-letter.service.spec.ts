@@ -8,8 +8,12 @@ function build() {
     debit: jest.fn().mockResolvedValue(undefined),
     balance: jest.fn().mockResolvedValue(10),
   };
+  const paymentConfig = {
+    get: jest.fn().mockResolvedValue({ coverLetterRegenCost: 2 }),
+  };
   const guard = {
     collectKnownOrgs: jest.fn().mockReturnValue([]),
+    collectKnownCertifications: jest.fn().mockReturnValue([]),
     check: jest.fn().mockReturnValue({ safe: true, violations: [] }),
   };
   const letters = {
@@ -42,6 +46,7 @@ function build() {
     ai,
     chunker,
     credits as any,
+    paymentConfig as any,
     guard as any,
     letters as any,
     insights as any,
@@ -154,6 +159,7 @@ describe('CoverLetterService.generate', () => {
       'Acme Corp — built things.',
       ['Acme Corp'],
       ['Globex', 'Engineer'],
+      [],
     );
   });
 
@@ -176,6 +182,7 @@ describe('CoverLetterService.generate', () => {
       expect.any(String),
       expect.any(Array),
       ['', 'Sr. Fullstack Developer'],
+      expect.any(Array),
     );
   });
 });
