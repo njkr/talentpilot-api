@@ -68,13 +68,18 @@ export class CompanyService {
       stepName: 'research_company',
     });
 
-    await this.cache.save(
-      this.cache.create({
+    // upsert, not save(create()): the lookup above only matches an UNEXPIRED row, so a
+    // stale row for this same company can still be sitting in the table — a plain
+    // insert would collide with its still-unique companyHash. Refreshing it in place is
+    // exactly what should happen to an expired cache entry anyway.
+    await this.cache.upsert(
+      {
         companyHash: hash,
         companyName: company,
         payload: out,
         expiresAt: new Date(Date.now() + CACHE_TTL_MS),
-      }),
+      },
+      { conflictPaths: ['companyHash'] },
     );
     return this.copyToWorkspace(ctx, out, company, false);
   }

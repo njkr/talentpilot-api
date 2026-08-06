@@ -28,10 +28,9 @@ function build() {
       if (!row) return Promise.resolve(null);
       return Promise.resolve(row.expiresAt > new Date() ? row : null);
     }),
-    create: jest.fn((x: any) => x),
-    save: jest.fn((x: any) => {
-      cacheStore.set(x.companyHash, x);
-      return Promise.resolve(x);
+    upsert: jest.fn((...args: [any, any]) => {
+      cacheStore.set(args[0].companyHash, args[0]);
+      return Promise.resolve({ identifiers: [], generatedMaps: [], raw: [] });
     }),
   };
   const insights = {
@@ -89,6 +88,34 @@ describe('CompanyService.research', () => {
     const secondCall = insights.save.mock.calls[1][0];
     expect(secondCall.workspaceId).toBe('ws-b');
     expect(secondCall.fromCache).toBe(true);
+  });
+
+  it('refreshes an expired cache row in place instead of erroring on the unique hash', async () => {
+    const { service, research, complete, cache, ctxFor } = build();
+    const hash = (service as any).normaliseCompany('Stripe, Inc.');
+
+    // Seed a row that's still physically present but past its TTL — same shape a real
+    // DB row left over from a prior 7-day cycle would have. findOne's own MoreThan(now)
+    // filter already treats this as a miss; the bug this regression guards against is
+    // the SAVE path then colliding with this row's still-unique companyHash.
+    await cache.upsert(
+      {
+        companyHash: hash,
+        companyName: 'Stripe, Inc.',
+        payload: { overview: 'stale' },
+        expiresAt: new Date(Date.now() - 1000),
+      },
+      { conflictPaths: ['companyHash'] },
+    );
+
+    await service.research(ctxFor('user-a', 'ws-a') as any);
+
+    expect(research).toHaveBeenCalledTimes(1);
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(cache.upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({ companyHash: hash }),
+      { conflictPaths: ['companyHash'] },
+    );
   });
 
   it('throws cleanly when the JD has no company name', async () => {
