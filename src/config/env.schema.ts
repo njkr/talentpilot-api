@@ -6,6 +6,10 @@ export const envSchema = z.object({
     .default('development'),
   PORT: z.string().default('3000'),
   APP_URL: z.string().url().default('http://localhost:3000'),
+  // Extra CORS origins beyond APP_URL, comma-separated — e.g. testing from a phone/other
+  // device on the LAN via the host machine's IP. APP_URL itself is always allowed and is
+  // still what email links/Stripe redirects use; this only widens the CORS allowlist.
+  CORS_ORIGINS: z.string().optional(),
 
   DATABASE_URL: z.string().url(),
   DB_POOL_SIZE: z.coerce.number().default(10),

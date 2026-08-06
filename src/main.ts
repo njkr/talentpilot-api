@@ -33,8 +33,14 @@ async function bootstrap() {
   // this, req.cookies is always undefined and every refresh/logout call fails.
   app.use(cookieParser());
 
+  const extraOrigins =
+    env
+      .get('CORS_ORIGINS')
+      ?.split(',')
+      .map((o) => o.trim())
+      .filter(Boolean) ?? [];
   app.enableCors({
-    origin: env.get('APP_URL'),
+    origin: [env.get('APP_URL'), ...extraOrigins],
     credentials: true, // the refresh cookie must be allowed to cross the browser/API origin
   });
 
