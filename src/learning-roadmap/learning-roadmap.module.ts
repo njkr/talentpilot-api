@@ -7,6 +7,7 @@ import { Workspace } from '../workspaces/entities/workspace.entity';
 import { LearningRoadmapService } from './learning-roadmap.service';
 import { LearningRoadmapController } from './learning-roadmap.controller';
 import { AiModule } from '../ai/ai.module';
+import { AffiliateLinksModule } from '../affiliate-links/affiliate-links.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AiModule } from '../ai/ai.module';
       Workspace,
     ]),
     AiModule,
+    AffiliateLinksModule,
   ],
   controllers: [LearningRoadmapController],
   providers: [LearningRoadmapService],

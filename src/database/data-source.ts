@@ -35,6 +35,7 @@ import { PaymentConfig } from '../payments/entities/payment-config.entity';
 import { CreditPack } from '../payments/entities/credit-pack.entity';
 import { Referral } from '../referrals/entities/referral.entity';
 import { IntegrationCall } from '../integration-calls/entities/integration-call.entity';
+import { AffiliateLink } from '../affiliate-links/entities/affiliate-link.entity';
 
 // Single source of truth for the DB connection, shared by:
 //  - the Nest app (via TypeOrmModule.forRootAsync in app.module.ts)
@@ -81,6 +82,7 @@ export const dataSourceOptions: DataSourceOptions = {
     CreditPack,
     Referral,
     IntegrationCall,
+    AffiliateLink,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   synchronize: false, // migrations only — see Sprint 1 §2

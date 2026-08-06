@@ -6,12 +6,16 @@ function build(items: Array<{ priority: string; title: string }>) {
   const roadmaps = {
     create: jest.fn((x) => x),
     save: jest.fn((x) => Promise.resolve({ id: 'roadmap-1', ...x })),
+    findOne: jest.fn(),
   };
   const reports = {
     findOne: jest.fn().mockResolvedValue({ id: 'report-1', weaknesses: [] }),
   };
   const matches = { find: jest.fn().mockResolvedValue([]) };
   const workspaces = { findOne: jest.fn() };
+  const affiliateLinks = {
+    findAffiliateUrl: jest.fn().mockResolvedValue(null),
+  };
 
   const service = new LearningRoadmapService(
     ai,
@@ -19,6 +23,7 @@ function build(items: Array<{ priority: string; title: string }>) {
     reports as any,
     matches as any,
     workspaces as any,
+    affiliateLinks as any,
   );
 
   const ctx = {
@@ -28,7 +33,7 @@ function build(items: Array<{ priority: string; title: string }>) {
     jd: { position: 'Engineer', parsedData: null },
   } as any;
 
-  return { service, ctx, roadmaps };
+  return { service, ctx, roadmaps, workspaces, affiliateLinks };
 }
 
 describe('LearningRoadmapService.generate', () => {
@@ -78,5 +83,44 @@ describe('LearningRoadmapService.generate', () => {
     expect(roadmap.items).toHaveLength(6);
     expect(roadmap.items[0].title).toBe('Must learn this');
     expect(roadmap.items[1].title).toBe('Also required');
+  });
+});
+
+describe('LearningRoadmapService.getForWorkspace', () => {
+  it('attaches an affiliateUrl per item without touching the stored url field', async () => {
+    const { service, ctx, roadmaps, workspaces, affiliateLinks } = build([]);
+    workspaces.findOne.mockResolvedValue({ id: ctx.workspaceId });
+    roadmaps.findOne.mockResolvedValue({
+      id: 'roadmap-1',
+      workspaceId: ctx.workspaceId,
+      runId: ctx.runId,
+      items: [
+        {
+          title: 'Fluent Python',
+          gapReason: 'gap',
+          resourceType: 'book',
+          url: null,
+          estHours: 10,
+          priority: 'required',
+        },
+      ],
+      createdAt: new Date(),
+    });
+    affiliateLinks.findAffiliateUrl.mockResolvedValue(
+      'https://example.com/s?k=Fluent%20Python',
+    );
+
+    const result = await service.getForWorkspace(ctx.workspaceId, ctx.userId);
+
+    expect(affiliateLinks.findAffiliateUrl).toHaveBeenCalledWith(
+      'book',
+      'Fluent Python',
+    );
+    expect(result.items[0]).toEqual(
+      expect.objectContaining({
+        url: null,
+        affiliateUrl: 'https://example.com/s?k=Fluent%20Python',
+      }),
+    );
   });
 });

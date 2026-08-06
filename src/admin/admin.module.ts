@@ -14,6 +14,7 @@ import { Plan } from '../payments/entities/plan.entity';
 import { PromptsModule } from '../prompts/prompts.module';
 import { AuditModule } from '../audit/audit.module';
 import { IntegrationCallsModule } from '../integration-calls/integration-calls.module';
+import { AffiliateLinksModule } from '../affiliate-links/affiliate-links.module';
 import { AdminGuard } from './guards/admin.guard';
 import { AdminService } from './admin.service';
 import { AdminController } from './admin.controller';
@@ -21,6 +22,7 @@ import { AdminIntegrationsService } from './admin-integrations.service';
 import { AdminIntegrationsController } from './admin-integrations.controller';
 import { AdminUsersService } from './admin-users.service';
 import { AdminUsersController } from './admin-users.controller';
+import { AdminAffiliateLinksController } from './admin-affiliate-links.controller';
 
 @Module({
   imports: [
@@ -48,11 +50,13 @@ import { AdminUsersController } from './admin-users.controller';
     PromptsModule,
     AuditModule,
     IntegrationCallsModule,
+    AffiliateLinksModule,
   ],
   controllers: [
     AdminController,
     AdminIntegrationsController,
     AdminUsersController,
+    AdminAffiliateLinksController,
   ],
   providers: [
     AdminGuard,

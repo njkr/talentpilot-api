@@ -3,17 +3,38 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { AiService } from '../ai/ai.service';
 import { LearningRoadmapOutput } from '../ai/schemas/learning-roadmap.schema';
-import { LearningRoadmap } from './entities/learning-roadmap.entity';
+import {
+  LearningRoadmap,
+  LearningRoadmapItem,
+} from './entities/learning-roadmap.entity';
 import { AtsReport } from '../ats/entities/ats-report.entity';
 import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
 import { Workspace } from '../workspaces/entities/workspace.entity';
 import { PipelineContext } from '../pipeline/steps/step.interface';
 import { renderJdSummary } from '../job-descriptions/utils/render-jd.util';
+import { AffiliateLinksService } from '../affiliate-links/affiliate-links.service';
 
 // required before preferred — NOT trusted to the model's own output order (the prompt
 // asks for this, but nothing before this fix verified it; the same reasoning that
 // keeps ATS scoring and keyword matching out of the model's hands entirely).
 const PRIORITY_RANK: Record<string, number> = { required: 0, preferred: 1 };
+
+export interface LearningRoadmapItemResponse extends LearningRoadmapItem {
+  // Admin-configured affiliate link (see AffiliateLinksService), computed at read time —
+  // never stored on the row itself, so changing the admin config retroactively affects
+  // every existing roadmap. Deliberately separate from `url` (the AI's own guess, often
+  // null) rather than overwriting it: on the rare occasion the AI already produced a
+  // real, specific link, replacing it with a generic affiliate search link would be a
+  // downgrade, not an improvement.
+  affiliateUrl: string | null;
+}
+
+export interface LearningRoadmapResponse extends Omit<
+  LearningRoadmap,
+  'items'
+> {
+  items: LearningRoadmapItemResponse[];
+}
 
 @Injectable()
 export class LearningRoadmapService {
@@ -27,6 +48,7 @@ export class LearningRoadmapService {
     private readonly matches: Repository<AtsKeywordMatch>,
     @InjectRepository(Workspace)
     private readonly workspaces: Repository<Workspace>,
+    private readonly affiliateLinks: AffiliateLinksService,
   ) {}
 
   async generate(ctx: PipelineContext): Promise<LearningRoadmap> {
@@ -80,13 +102,23 @@ export class LearningRoadmapService {
   async getForWorkspace(
     workspaceId: string,
     userId: string,
-  ): Promise<LearningRoadmap> {
+  ): Promise<LearningRoadmapResponse> {
     const ws = await this.workspaces.findOne({
       where: { id: workspaceId, userId },
     });
     if (!ws) throw new NotFoundException();
     const roadmap = await this.roadmaps.findOne({ where: { workspaceId } });
     if (!roadmap) throw new NotFoundException();
-    return roadmap;
+
+    const items = await Promise.all(
+      roadmap.items.map(async (item) => ({
+        ...item,
+        affiliateUrl: await this.affiliateLinks.findAffiliateUrl(
+          item.resourceType,
+          item.title,
+        ),
+      })),
+    );
+    return { ...roadmap, items };
   }
 }
