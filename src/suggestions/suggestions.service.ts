@@ -54,6 +54,9 @@ export class SuggestionsService {
         (IMPORTANCE_RANK[a.importance] ?? 99) -
         (IMPORTANCE_RANK[b.importance] ?? 99),
     );
+    // The vocabulary Guard 2 checks a claimed skill against — narrow to this report's
+    // own gaps, not free text, so the check can't misfire on ordinary vocabulary.
+    const jdKeywords = gaps.map((g) => g.keyword);
 
     const { data: out } = await this.ai.complete<ResumeOptimization>({
       feature: 'resume_optimization',
@@ -81,25 +84,15 @@ export class SuggestionsService {
     const sourceText = ctx.resume.rawText ?? '';
     const accepted: Array<Partial<AiSuggestion>> = [];
     let dropped = 0;
+    let needsInfo = 0;
 
     for (const s of out.suggestions) {
-      // ── Guard 1: fabrication ──
-      const check = this.guard.check(
-        s.newText,
-        sourceText,
-        knownOrgs,
-        [],
-        knownCertifications,
-      );
-      if (!check.safe) {
-        dropped++;
-        continue;
-      }
-
-      // ── Guard 2: oldText must actually exist ──
+      // ── Guard 1: oldText must actually exist ──
       // The model is told to reproduce it exactly; sometimes it paraphrases. If we
-      // can't locate the text, we cannot apply the change safely, so the suggestion
-      // is useless.
+      // can't locate the text, we cannot apply the change safely (there's nowhere to
+      // anchor even a needs_info row), so the suggestion is dropped outright —
+      // resolved BEFORE the fabrication check because a needs_info row still needs a
+      // real oldText/oldTextHash to eventually apply against.
       const sectionType = s.sectionType as OptimizableSectionType;
       const section = findSection(ctx.sections, sectionType);
       const actual = section
@@ -112,6 +105,42 @@ export class SuggestionsService {
         : null;
       if (actual === null || this.loose(actual) !== this.loose(s.oldText)) {
         dropped++;
+        continue;
+      }
+
+      // ── Guard 2: fabrication ──
+      // A violation no longer means a silent drop — the user sees WHAT'S missing and
+      // the model's own invented text repurposed as an illustrative example, and can
+      // supply their own real detail (SuggestionsController's provide-detail route)
+      // instead of the suggestion just vanishing with no explanation.
+      const check = this.guard.check(
+        s.newText,
+        sourceText,
+        knownOrgs,
+        [],
+        knownCertifications,
+        jdKeywords,
+      );
+      if (!check.safe) {
+        needsInfo++;
+        const summary = this.guard.summariseForNeedsInfo(check);
+        accepted.push({
+          workspaceId: ctx.workspaceId,
+          runId: ctx.runId,
+          sectionType,
+          itemIndex: s.itemIndex,
+          bulletIndex: s.bulletIndex,
+          oldText: actual,
+          oldTextHash: createHash('sha256').update(actual).digest('hex'),
+          newText: s.newText,
+          reason: s.reason,
+          impact: s.impact,
+          keywordsAdded: s.keywordsAdded,
+          status: 'needs_info',
+          missingFact: summary.missingFact,
+          exampleValue: summary.exampleValue,
+          needsDirectEdit: summary.needsDirectEdit,
+        });
         continue;
       }
 
@@ -137,9 +166,9 @@ export class SuggestionsService {
       });
     }
 
-    if (dropped) {
+    if (dropped || needsInfo) {
       this.logger.warn(
-        `Dropped ${dropped}/${out.suggestions.length} suggestions for workspace ${ctx.workspaceId}`,
+        `Dropped ${dropped}, needs_info ${needsInfo} of ${out.suggestions.length} suggestions for workspace ${ctx.workspaceId}`,
       );
     }
     if (!accepted.length) return [];

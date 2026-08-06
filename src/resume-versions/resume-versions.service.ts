@@ -11,6 +11,8 @@ import {
 } from '../suggestions/entities/ai-suggestion.entity';
 import { Workspace } from '../workspaces/entities/workspace.entity';
 import { GeneratedDocument } from '../documents/entities/generated-document.entity';
+import { AtsReport } from '../ats/entities/ats-report.entity';
+import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
 import {
   findSection,
   readSuggestionTarget,
@@ -18,6 +20,7 @@ import {
 } from '../suggestions/utils/section-address.util';
 import { flattenSection } from './utils/flatten-section.util';
 import { diffWords } from 'diff';
+import { FabricationGuardService } from '../suggestions/services/fabrication-guard.service';
 
 export interface ApplyResult {
   version: number;
@@ -39,7 +42,12 @@ export class ResumeVersionsService {
     private readonly workspaces: Repository<Workspace>,
     @InjectRepository(GeneratedDocument)
     private readonly generatedDocuments: Repository<GeneratedDocument>,
+    @InjectRepository(AtsReport)
+    private readonly atsReports: Repository<AtsReport>,
+    @InjectRepository(AtsKeywordMatch)
+    private readonly atsKeywordMatches: Repository<AtsKeywordMatch>,
     private readonly dataSource: DataSource,
+    private readonly guard: FabricationGuardService,
   ) {}
 
   async listVersions(
@@ -56,7 +64,12 @@ export class ResumeVersionsService {
   async listSuggestions(
     workspaceId: string,
     userId: string,
-    status: 'pending' | 'accepted' | 'rejected' | 'stale' = 'pending',
+    status:
+      | 'pending'
+      | 'accepted'
+      | 'rejected'
+      | 'stale'
+      | 'needs_info' = 'pending',
   ): Promise<AiSuggestion[]> {
     await this.assertWorkspaceOwned(workspaceId, userId);
     return this.suggestions.find({
@@ -71,11 +84,91 @@ export class ResumeVersionsService {
     suggestionIds: string[],
   ): Promise<number> {
     await this.assertWorkspaceOwned(workspaceId, userId);
+    // needs_info is rejectable too — "skip" for a suggestion the user doesn't want
+    // to supply a real detail for.
     const result = await this.suggestions.update(
-      { id: In(suggestionIds), workspaceId, status: 'pending' },
+      {
+        id: In(suggestionIds),
+        workspaceId,
+        status: In(['pending', 'needs_info']),
+      },
       { status: 'rejected', decidedAt: new Date() },
     );
     return result.affected ?? 0;
+  }
+
+  /**
+   * The user supplies their own real text for a `needs_info` suggestion — the AI's
+   * invented example (missingFact/exampleValue) was never appliable as-is. Re-runs
+   * FabricationGuardService on what the user wrote: they could still introduce
+   * something ungrounded, and the guard applies uniformly regardless of who wrote the
+   * text. If it passes, the suggestion becomes a normal `pending` suggestion that
+   * flows through the existing apply path unchanged; if it still fails, it stays
+   * `needs_info` with updated guidance instead of silently accepting bad text.
+   */
+  async provideDetail(
+    workspaceId: string,
+    userId: string,
+    suggestionId: string,
+    newText: string,
+  ): Promise<AiSuggestion> {
+    const ws = await this.workspaces.findOne({
+      where: { id: workspaceId, userId },
+    });
+    if (!ws) throw new NotFoundException();
+
+    const suggestion = await this.suggestions.findOne({
+      where: { id: suggestionId, workspaceId, status: 'needs_info' },
+    });
+    if (!suggestion) {
+      throw new NotFoundException('No needs_info suggestion with that id.');
+    }
+
+    const resume = await this.assertOwned(ws.resumeId, userId);
+    const sections = await this.sections.find({
+      where: { resumeId: resume.id, version: resume.currentVersion },
+    });
+    const knownOrgs = this.guard.collectKnownOrgs(sections);
+    const knownCertifications = this.guard.collectKnownCertifications(sections);
+    const jdKeywords = await this.jdKeywordsFor(workspaceId);
+    const check = this.guard.check(
+      newText,
+      resume.rawText ?? '',
+      knownOrgs,
+      [],
+      knownCertifications,
+      jdKeywords,
+    );
+
+    suggestion.newText = newText;
+    if (!check.safe) {
+      const summary = this.guard.summariseForNeedsInfo(check);
+      suggestion.missingFact = summary.missingFact;
+      suggestion.exampleValue = summary.exampleValue;
+      suggestion.needsDirectEdit = summary.needsDirectEdit;
+      // status stays 'needs_info'
+    } else {
+      suggestion.status = 'pending';
+      suggestion.missingFact = null;
+      suggestion.exampleValue = null;
+      suggestion.needsDirectEdit = false;
+    }
+    return this.suggestions.save(suggestion);
+  }
+
+  /** Same gap-keyword vocabulary SuggestionsService.generate() builds worker-side —
+   * duplicated here rather than shared because this module deliberately has no
+   * dependency on the worker-only suggestions module. */
+  private async jdKeywordsFor(workspaceId: string): Promise<string[]> {
+    const report = await this.atsReports.findOne({
+      where: { workspaceId },
+      order: { createdAt: 'DESC' },
+    });
+    if (!report) return [];
+    const gaps = await this.atsKeywordMatches.find({
+      where: { atsReportId: report.id, status: In(['missing', 'partial']) },
+    });
+    return gaps.map((g) => g.keyword);
   }
 
   /**

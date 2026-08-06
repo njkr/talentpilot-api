@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PipelineCommonModule } from './pipeline-common.module';
 import { Workspace } from '../workspaces/entities/workspace.entity';
@@ -42,6 +43,7 @@ import { BuildLearningPathStep } from './steps/build-learning-path.step';
 import { ResearchCompanyStep } from './steps/research-company.step';
 import { EstimateSalaryStep } from './steps/estimate-salary.step';
 import { FinalizeStep } from './steps/finalize.step';
+import { RescoreProcessor } from '../ats/rescore.processor';
 
 /**
  * Worker-only: the actual step-execution machinery (StepRunner + all 12 steps + their
@@ -51,6 +53,7 @@ import { FinalizeStep } from './steps/finalize.step';
 @Module({
   imports: [
     PipelineCommonModule,
+    BullModule.registerQueue({ name: 'rescore' }), // worker side: RescoreProcessor consumes
     TypeOrmModule.forFeature([
       Workspace,
       Resume,
@@ -115,6 +118,7 @@ import { FinalizeStep } from './steps/finalize.step';
     ContextHydrator,
     StepRunner,
     PipelineNotificationListener,
+    RescoreProcessor,
   ],
   exports: [StepRunner],
 })

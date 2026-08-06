@@ -2416,7 +2416,7 @@
                 "{{jdId}}"
               ]
             },
-            "description": "Embeds both sides (skipping any chunk whose content is unchanged since the last call — free on a re-run), then returns a calibrated 0-100 semantic score per requirement plus a keyword coverage report. The resume must be `parsed` and the job description `analyzed` first.",
+            "description": "Embeds both sides (skipping any chunk whose content is unchanged since the last call — free on a re-run), then returns a calibrated 0-100 semantic score per requirement plus a keyword coverage report. The resume must be `parsed` and the job description `analyzed` first. Not credit-gated — cheap enough to call BEFORE a user spends analysis credits on a workspace, e.g. to warn on a badly-matched JD via the `coverage` field (`{ requiredTotal, requiredMatched, requiredMissing, preferredTotal, preferredMatched, missingRequiredKeywords }`) before they commit to a full paid analysis.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2457,7 +2457,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"semanticScore\": 28,\n    \"perRequirement\": [\n      {\n        \"requirement\": \"5+ years of experience with Node.js\",\n        \"importance\": \"required\",\n        \"rawSimilarity\": 0.5424,\n        \"score\": 48,\n        \"evidence\": \"Professional summary: Dynamic Full Stack Web Developer with over 7 years...\",\n        \"foundIn\": \"Summary\",\n        \"verdict\": \"partial\"\n      }\n    ],\n    \"keywords\": [\n      {\n        \"keyword\": \"Node.js\",\n        \"canonical\": \"node.js\",\n        \"category\": \"language\",\n        \"importance\": \"required\",\n        \"status\": \"matched\",\n        \"foundIn\": [\n          \"skills\"\n        ],\n        \"source\": \"exact\"\n      }\n    ],\n    \"stats\": {\n      \"resume\": {\n        \"embedded\": 0,\n        \"reused\": 8\n      },\n      \"jd\": {\n        \"embedded\": 11,\n        \"reused\": 0\n      }\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-20T17:21:34.861Z\"\n  }\n}"
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"semanticScore\": 28,\n    \"perRequirement\": [\n      {\n        \"requirement\": \"5+ years of experience with Node.js\",\n        \"importance\": \"required\",\n        \"rawSimilarity\": 0.5424,\n        \"score\": 48,\n        \"evidence\": \"Professional summary: Dynamic Full Stack Web Developer with over 7 years...\",\n        \"foundIn\": \"Summary\",\n        \"verdict\": \"partial\"\n      }\n    ],\n    \"keywords\": [\n      {\n        \"keyword\": \"Node.js\",\n        \"canonical\": \"node.js\",\n        \"category\": \"language\",\n        \"importance\": \"required\",\n        \"status\": \"matched\",\n        \"foundIn\": [\n          \"skills\"\n        ],\n        \"source\": \"exact\"\n      },\n      {\n        \"keyword\": \"Unity\",\n        \"canonical\": \"unity\",\n        \"category\": \"framework\",\n        \"importance\": \"required\",\n        \"status\": \"missing\",\n        \"foundIn\": [],\n        \"source\": \"ai\"\n      }\n    ],\n    \"stats\": {\n      \"resume\": {\n        \"embedded\": 0,\n        \"reused\": 8\n      },\n      \"jd\": {\n        \"embedded\": 11,\n        \"reused\": 0\n      }\n    },\n    \"coverage\": {\n      \"requiredTotal\": 2,\n      \"requiredMatched\": 1,\n      \"requiredMissing\": 1,\n      \"preferredTotal\": 0,\n      \"preferredMatched\": 0,\n      \"missingRequiredKeywords\": [\n        \"Unity\"\n      ]\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-20T17:21:34.861Z\"\n  }\n}"
             },
             {
               "name": "409 Not Ready",
@@ -3246,7 +3246,7 @@
                 "report"
               ]
             },
-            "description": "The actual score — the output of the most recent completed `score_ats` step for this workspace: `overallScore`, the seven-component breakdown with the exact weight/contribution of each (so the UI can show its work, not just a bare number), AI-written strengths/weaknesses/recommendations, and the full keyword match list. Only meaningful once the workspace's `status` (from **Get Workspace** / **Get Run Status**) is `completed` or has a report despite being `partial` — otherwise 409s with `REPORT_NOT_READY`.",
+            "description": "The actual score — the output of the most recent completed `score_ats` step for this workspace: `overallScore`, the seven-component breakdown with the exact weight/contribution of each (so the UI can show its work, not just a bare number), AI-written strengths/weaknesses/recommendations, and the full keyword match list. Only meaningful once the workspace's `status` (from **Get Workspace** / **Get Run Status**) is `completed` or has a report despite being `partial` — otherwise 409s with `REPORT_NOT_READY`. `resumeVersion` says which resume version this report scored (1 for the original analysis, higher after a **Recalculate Score** rescore). `original` nests the very first report ever generated for this workspace — the genuine \"before\" score — and stays `null` until at least one rescore has actually run; its own `keywords` array is always empty by design (only its scores matter for a before/after diff). `matchBand` (`{ band: \"low\"|\"fair\"|\"strong\", requiredMet, requiredTotal }`) reframes the score as a fit verdict for THIS job rather than a grade on the resume — computed from the same `keywords` array, `null` only on the nested `original`.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3286,7 +3286,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"c3d4e5f6-1a2b-4c3d-9e8f-7a6b5c4d3e2f\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"runId\": \"{{runId}}\",\n    \"overallScore\": 72,\n    \"keywordScore\": 91,\n    \"semanticScore\": 28,\n    \"experienceScore\": 70,\n    \"educationScore\": 60,\n    \"projectScore\": 80,\n    \"formatScore\": 90,\n    \"grammarScore\": 90,\n    \"scoreBreakdown\": [\n      { \"component\": \"keyword\", \"score\": 91, \"weight\": 0.3, \"contribution\": 27.3 },\n      { \"component\": \"semantic\", \"score\": 28, \"weight\": 0.2, \"contribution\": 5.6 },\n      { \"component\": \"experience\", \"score\": 70, \"weight\": 0.15, \"contribution\": 10.5 },\n      { \"component\": \"education\", \"score\": 60, \"weight\": 0.1, \"contribution\": 6.0 },\n      { \"component\": \"project\", \"score\": 80, \"weight\": 0.1, \"contribution\": 8.0 },\n      { \"component\": \"format\", \"score\": 90, \"weight\": 0.1, \"contribution\": 9.0 },\n      { \"component\": \"grammar\", \"score\": 90, \"weight\": 0.05, \"contribution\": 4.5 }\n    ],\n    \"summary\": \"Solid backend candidate with strong keyword coverage but limited direct evidence of the specific Node.js/TypeScript stack requested.\",\n    \"strengths\": [\n      \"7+ years of full-stack experience, exceeding the 5-year requirement\",\n      \"Direct PostgreSQL experience called out explicitly\"\n    ],\n    \"weaknesses\": [\n      \"No explicit mention of Kubernetes or container orchestration\"\n    ],\n    \"recommendations\": [\n      \"Add a bullet quantifying an achievement with Node.js specifically\"\n    ],\n    \"keywords\": [\n      {\n        \"keyword\": \"Node.js\",\n        \"canonical\": \"node.js\",\n        \"category\": \"language\",\n        \"importance\": \"required\",\n        \"status\": \"matched\",\n        \"evidence\": \"Skills: Node.js, Express, TypeScript\",\n        \"foundIn\": [\"skills\"],\n        \"suggestion\": null\n      },\n      {\n        \"keyword\": \"Kubernetes\",\n        \"canonical\": \"kubernetes\",\n        \"category\": \"tool\",\n        \"importance\": \"preferred\",\n        \"status\": \"missing\",\n        \"evidence\": null,\n        \"foundIn\": [],\n        \"suggestion\": \"Mention any container orchestration experience, even informal\"\n      }\n    ],\n    \"createdAt\": \"2026-07-21T09:12:40.918Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:55.201Z\"\n  }\n}"
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"c3d4e5f6-1a2b-4c3d-9e8f-7a6b5c4d3e2f\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"runId\": \"{{runId}}\",\n    \"resumeVersion\": 4,\n    \"overallScore\": 72,\n    \"keywordScore\": 91,\n    \"semanticScore\": 28,\n    \"experienceScore\": 70,\n    \"educationScore\": 60,\n    \"projectScore\": 80,\n    \"formatScore\": 90,\n    \"grammarScore\": 90,\n    \"scoreBreakdown\": [\n      { \"component\": \"keyword\", \"score\": 91, \"weight\": 0.3, \"contribution\": 27.3 },\n      { \"component\": \"semantic\", \"score\": 28, \"weight\": 0.2, \"contribution\": 5.6 },\n      { \"component\": \"experience\", \"score\": 70, \"weight\": 0.15, \"contribution\": 10.5 },\n      { \"component\": \"education\", \"score\": 60, \"weight\": 0.1, \"contribution\": 6.0 },\n      { \"component\": \"project\", \"score\": 80, \"weight\": 0.1, \"contribution\": 8.0 },\n      { \"component\": \"format\", \"score\": 90, \"weight\": 0.1, \"contribution\": 9.0 },\n      { \"component\": \"grammar\", \"score\": 90, \"weight\": 0.05, \"contribution\": 4.5 }\n    ],\n    \"summary\": \"Solid backend candidate with strong keyword coverage but limited direct evidence of the specific Node.js/TypeScript stack requested.\",\n    \"strengths\": [\n      \"7+ years of full-stack experience, exceeding the 5-year requirement\",\n      \"Direct PostgreSQL experience called out explicitly\"\n    ],\n    \"weaknesses\": [\n      \"No explicit mention of Kubernetes or container orchestration\"\n    ],\n    \"recommendations\": [\n      \"Add a bullet quantifying an achievement with Node.js specifically\"\n    ],\n    \"keywords\": [\n      {\n        \"keyword\": \"Node.js\",\n        \"canonical\": \"node.js\",\n        \"category\": \"language\",\n        \"importance\": \"required\",\n        \"status\": \"matched\",\n        \"evidence\": \"Skills: Node.js, Express, TypeScript\",\n        \"foundIn\": [\"skills\"],\n        \"suggestion\": null\n      },\n      {\n        \"keyword\": \"Kubernetes\",\n        \"canonical\": \"kubernetes\",\n        \"category\": \"tool\",\n        \"importance\": \"preferred\",\n        \"status\": \"missing\",\n        \"evidence\": null,\n        \"foundIn\": [],\n        \"suggestion\": \"Mention any container orchestration experience, even informal\"\n      }\n    ],\n    \"createdAt\": \"2026-07-21T09:12:40.918Z\",\n    \"matchBand\": { \"band\": \"strong\", \"requiredMet\": 1, \"requiredTotal\": 1 },\n    \"original\": {\n      \"id\": \"a1b2c3d4-1a2b-4c3d-9e8f-7a6b5c4d3e2f\",\n      \"workspaceId\": \"{{workspaceId}}\",\n      \"runId\": \"{{runId}}\",\n      \"resumeVersion\": 1,\n      \"overallScore\": 69,\n      \"keywordScore\": 85,\n      \"semanticScore\": 41,\n      \"experienceScore\": 68,\n      \"educationScore\": 50,\n      \"projectScore\": 70,\n      \"formatScore\": 90,\n      \"grammarScore\": 85,\n      \"scoreBreakdown\": [\n        { \"component\": \"keyword\", \"score\": 85, \"weight\": 0.3, \"contribution\": 25.5 },\n        { \"component\": \"semantic\", \"score\": 41, \"weight\": 0.2, \"contribution\": 8.2 },\n        { \"component\": \"experience\", \"score\": 68, \"weight\": 0.15, \"contribution\": 10.2 },\n        { \"component\": \"education\", \"score\": 50, \"weight\": 0.1, \"contribution\": 5.0 },\n        { \"component\": \"project\", \"score\": 70, \"weight\": 0.1, \"contribution\": 7.0 },\n        { \"component\": \"format\", \"score\": 90, \"weight\": 0.1, \"contribution\": 9.0 },\n        { \"component\": \"grammar\", \"score\": 85, \"weight\": 0.05, \"contribution\": 4.25 }\n      ],\n      \"summary\": \"Your experience is strong, but there are gaps in PHP and SQL that matter for this role.\",\n      \"strengths\": [\"Over 7 years of experience\", \"Strong JavaScript/React/Node.js skills\"],\n      \"weaknesses\": [\"Partial PHP proficiency\", \"Limited SQL experience\"],\n      \"recommendations\": [\"Enhance PHP skills\", \"Gain more SQL experience\"],\n      \"keywords\": [],\n      \"createdAt\": \"2026-07-21T08:40:12.000Z\",\n      \"matchBand\": null,\n      \"original\": null\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:55.201Z\"\n  }\n}"
             },
             {
               "name": "409 Conflict — no completed analysis yet",
@@ -3316,6 +3316,124 @@
               ],
               "cookie": [],
               "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"REPORT_NOT_READY\",\n    \"message\": \"This workspace has no completed analysis yet (status: queued). Start or wait for a run to finish.\",\n    \"details\": {\n      \"status\": \"queued\"\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:55.201Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Recalculate Score",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/rescore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "rescore"
+              ]
+            },
+            "description": "Re-scores the CURRENT resume version against the same job description — genuinely new AI work (a fresh embedding + AI grading pass), charged separately from the original analysis via the admin-editable `rescoreCost` (default 5 credits, see **Get Payment Config** in Admin). Debits credits synchronously and returns `{ \"queued\": true }` immediately; the new report itself lands asynchronously via the worker — poll **Get ATS Report** the same way you'd poll after **Start Analysis**. Rejects with `NO_CHANGES_TO_RESCORE` if the resume hasn't changed since the last report (no credits are touched in that case), or `REPORT_NOT_READY` if no analysis has ever completed for this workspace.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/rescore",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "rescore"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"queued\": true\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:55.201Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — no changes since the last score",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/rescore",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "rescore"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NO_CHANGES_TO_RESCORE\",\n    \"message\": \"No changes since your last score — apply some suggestions first.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:55.201Z\"\n  }\n}"
+            },
+            {
+              "name": "402 Payment Required — insufficient credits",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/rescore",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "rescore"
+                  ]
+                }
+              },
+              "status": "Payment Required",
+              "code": 402,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"INSUFFICIENT_CREDITS\",\n    \"message\": \"This analysis needs 5 credits; you have 2.\",\n    \"details\": { \"required\": 5, \"balance\": 2 }\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:55.201Z\"\n  }\n}"
             }
           ]
         },
@@ -3493,11 +3611,11 @@
                 {
                   "key": "status",
                   "value": "pending",
-                  "description": "pending | accepted | rejected | stale"
+                  "description": "pending | accepted | rejected | stale | needs_info"
                 }
               ]
             },
-            "description": "AI-generated resume-optimisation suggestions from the `optimize_resume` pipeline step. Every suggestion has already passed the fabrication guard — invented metrics, years, organisations, and credentials are dropped silently before they ever reach this list.",
+            "description": "AI-generated resume-optimisation suggestions from the `optimize_resume` pipeline step (up to 20 per analysis, ordered by impact). A suggestion whose text the fabrication guard can't verify against the real resume is no longer dropped silently — it's returned with `status: \"needs_info\"` plus `missingFact` (what kind of real detail is missing) and `exampleValue` (the AI's own invented value, illustrative only). On a `needs_info` row, `newText` itself is also illustrative-only — see **Provide Suggestion Detail** below for how the user supplies their own real text instead. `needsDirectEdit: true` marks the one needs_info case (an unsupported skill/technology claim) that **cannot** be fixed via Provide Suggestion Detail — the check runs against the resume's frozen original text, which can never contain a skill added later, so resubmitting text there will always fail again. Point the user at editing their resume's Skills section directly instead.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3559,7 +3677,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"{{suggestionId}}\",\n      \"sectionType\": \"experience\",\n      \"itemIndex\": 0,\n      \"bulletIndex\": 1,\n      \"oldText\": \"Improved API performance\",\n      \"newText\": \"Improved API performance to support Node.js and TypeScript backend services\",\n      \"reason\": \"Surfaces the Node.js/TypeScript requirement using terminology already demonstrated in this bullet's surrounding experience\",\n      \"impact\": \"high\",\n      \"keywordsAdded\": [\n        \"Node.js\",\n        \"TypeScript\"\n      ],\n      \"status\": \"pending\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"{{suggestionId}}\",\n      \"sectionType\": \"experience\",\n      \"itemIndex\": 0,\n      \"bulletIndex\": 1,\n      \"oldText\": \"Improved API performance\",\n      \"newText\": \"Improved API performance to support Node.js and TypeScript backend services\",\n      \"reason\": \"Surfaces the Node.js/TypeScript requirement using terminology already demonstrated in this bullet's surrounding experience\",\n      \"impact\": \"high\",\n      \"keywordsAdded\": [\n        \"Node.js\",\n        \"TypeScript\"\n      ],\n      \"status\": \"pending\",\n      \"missingFact\": null,\n      \"exampleValue\": null,\n      \"needsDirectEdit\": false\n    },\n    {\n      \"id\": \"7b323549-dff0-490e-8e0a-e61d43809aec\",\n      \"sectionType\": \"experience\",\n      \"itemIndex\": 1,\n      \"bulletIndex\": 2,\n      \"oldText\": \"Led a small team on the checkout redesign.\",\n      \"newText\": \"Led a team of 6 engineers on the checkout redesign, cutting cart abandonment by 18%.\",\n      \"reason\": \"Quantifies leadership impact using a metric the job description emphasises\",\n      \"impact\": \"medium\",\n      \"keywordsAdded\": [],\n      \"status\": \"needs_info\",\n      \"missingFact\": \"a specific metric or number\",\n      \"exampleValue\": \"18%\",\n      \"needsDirectEdit\": false\n    },\n    {\n      \"id\": \"45425ac8-2422-4af5-ae4e-302bb22e2a2e\",\n      \"sectionType\": \"skills\",\n      \"itemIndex\": 5,\n      \"bulletIndex\": null,\n      \"oldText\": \"Proficient in Git version control for collaborative software development\",\n      \"newText\": \"Proficient in Git version control and Unity game engine development\",\n      \"reason\": \"Reinforcing Git proficiency aligns with the requirement for experience with Git version control.\",\n      \"impact\": \"medium\",\n      \"keywordsAdded\": [\n        \"Git\"\n      ],\n      \"status\": \"needs_info\",\n      \"missingFact\": \"Unity isn't evidenced anywhere in your resume — add it to your Skills section directly if it's genuinely true, then re-run suggestions. Retyping text here can't fix this.\",\n      \"exampleValue\": null,\n      \"needsDirectEdit\": true\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
             }
           ]
         },
@@ -3769,6 +3887,213 @@
               ],
               "cookie": [],
               "body": "{\n  \"success\": true,\n  \"data\": {\n    \"rejected\": 1\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Provide Suggestion Detail",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newText\": \"Led a team of 4 engineers on the checkout redesign, cutting cart abandonment by 12% over one quarter.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions/{{suggestionId}}/provide-detail",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "workspaces",
+                "{{workspaceId}}",
+                "suggestions",
+                "{{suggestionId}}",
+                "provide-detail"
+              ]
+            },
+            "description": "For a suggestion currently `needs_info` (see **List Suggestions**): the user supplies their own real replacement text instead of the AI's illustrative `exampleValue`. Re-runs the same fabrication check against this user-submitted text — if it's still unverifiable, the suggestion stays `needs_info` with a refreshed `missingFact`/`exampleValue`; if it passes, it flips to `pending` and flows through **Apply Suggestions** exactly like any other suggestion. 404s (`\"No needs_info suggestion with that id.\"`) if called on a suggestion that isn't currently `needs_info`. ⚠️ If the suggestion has `needsDirectEdit: true` (an unsupported skill/technology claim), calling this endpoint will ALWAYS return the same `needs_info` result no matter what text is submitted — the check runs against the resume's frozen original text, which can never contain a skill added after upload. Don't build a retry loop around this case; direct the user to edit their resume's Skills section instead.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK — now pending",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"newText\": \"Led a team of 4 engineers on the checkout redesign, cutting cart abandonment by 12% over one quarter.\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions/{{suggestionId}}/provide-detail",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "suggestions",
+                    "{{suggestionId}}",
+                    "provide-detail"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{suggestionId}}\",\n    \"sectionType\": \"experience\",\n    \"itemIndex\": 1,\n    \"bulletIndex\": 2,\n    \"oldText\": \"Led a small team on the checkout redesign.\",\n    \"newText\": \"Led a team of 4 engineers on the checkout redesign, cutting cart abandonment by 12% over one quarter.\",\n    \"reason\": \"Quantifies leadership impact using a metric the job description emphasises\",\n    \"impact\": \"medium\",\n    \"keywordsAdded\": [],\n    \"status\": \"pending\",\n    \"missingFact\": null,\n    \"exampleValue\": null,\n    \"needsDirectEdit\": false\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "200 OK — still needs_info (submitted text still unverifiable)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"newText\": \"Led a team of 40 engineers on the checkout redesign.\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions/{{suggestionId}}/provide-detail",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "suggestions",
+                    "{{suggestionId}}",
+                    "provide-detail"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{suggestionId}}\",\n    \"sectionType\": \"experience\",\n    \"itemIndex\": 1,\n    \"bulletIndex\": 2,\n    \"oldText\": \"Led a small team on the checkout redesign.\",\n    \"newText\": \"Led a team of 40 engineers on the checkout redesign.\",\n    \"reason\": \"Quantifies leadership impact using a metric the job description emphasises\",\n    \"impact\": \"medium\",\n    \"keywordsAdded\": [],\n    \"status\": \"needs_info\",\n    \"missingFact\": \"a specific metric or number\",\n    \"exampleValue\": \"40\",\n    \"needsDirectEdit\": false\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
+            },
+            {
+              "name": "200 OK — needsDirectEdit: unsupported skill claim, can NEVER be fixed via this endpoint",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"newText\": \"Proficient in Git version control and Unity game engine development\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions/{{suggestionId}}/provide-detail",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "suggestions",
+                    "{{suggestionId}}",
+                    "provide-detail"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"{{suggestionId}}\",\n    \"sectionType\": \"skills\",\n    \"itemIndex\": 5,\n    \"bulletIndex\": null,\n    \"oldText\": \"Proficient in Git version control for collaborative software development\",\n    \"newText\": \"Proficient in Git version control and Unity game engine development\",\n    \"reason\": \"Reinforcing Git proficiency aligns with the requirement for experience with Git version control.\",\n    \"impact\": \"medium\",\n    \"keywordsAdded\": [\n      \"Git\"\n    ],\n    \"status\": \"needs_info\",\n    \"missingFact\": \"Unity isn't evidenced anywhere in your resume — add it to your Skills section directly if it's genuinely true, then re-run suggestions. Retyping text here can't fix this.\",\n    \"exampleValue\": null,\n    \"needsDirectEdit\": true\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-08-05T11:34:08.772Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found — not a needs_info suggestion",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"newText\": \"Some replacement text.\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/suggestions/{{suggestionId}}/provide-detail",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "workspaces",
+                    "{{workspaceId}}",
+                    "suggestions",
+                    "{{suggestionId}}",
+                    "provide-detail"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"No needs_info suggestion with that id.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:10:02.551Z\"\n  }\n}"
             }
           ]
         },
@@ -4599,7 +4924,7 @@
                 "learning-roadmap"
               ]
             },
-            "description": "From `build_learning_path`. At most 6 items (enforced both by the prompt and in code) with realistic hour estimates, required gaps ordered before preferred ones — a 20-item roadmap reads as homework, not a plan.",
+            "description": "From `build_learning_path`. At most 6 items (enforced both by the prompt and in code) with realistic hour estimates, required gaps ordered before preferred ones — a 20-item roadmap reads as homework, not a plan. Each item's `affiliateUrl` (new) is computed at read time from the \"Admin — Affiliate Links\" config, matched by resourceType + a case-insensitive keyword substring against the title, falling back to the resourceType's default template, or null if nothing is configured — see that folder for the CRUD endpoints.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -4639,7 +4964,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"c9d0e1f2-7a8b-4c9d-8e1f-6a5b4c3d2e1f\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"runId\": \"d3a1d347-d0b7-46ff-b745-98ce747f419c\",\n    \"items\": [\n      {\n        \"title\": \"Node.js Documentation\",\n        \"gapReason\": \"The job requires strong Node.js backend experience beyond what your resume demonstrates\",\n        \"resourceType\": \"documentation\",\n        \"url\": \"https://nodejs.org/en/docs\",\n        \"estHours\": 20,\n        \"priority\": \"required\"\n      },\n      {\n        \"title\": \"Kubernetes Basics by Google Cloud\",\n        \"gapReason\": \"The role mentions Kubernetes-based deployments, which is a preferred (not required) skill\",\n        \"resourceType\": \"course\",\n        \"url\": null,\n        \"estHours\": 15,\n        \"priority\": \"preferred\"\n      }\n    ],\n    \"createdAt\": \"2026-07-21T09:12:30.552Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:30.560Z\"\n  }\n}"
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"c9d0e1f2-7a8b-4c9d-8e1f-6a5b4c3d2e1f\",\n    \"workspaceId\": \"{{workspaceId}}\",\n    \"runId\": \"d3a1d347-d0b7-46ff-b745-98ce747f419c\",\n    \"items\": [\n      {\n        \"title\": \"Node.js Documentation\",\n        \"gapReason\": \"The job requires strong Node.js backend experience beyond what your resume demonstrates\",\n        \"resourceType\": \"documentation\",\n        \"url\": \"https://nodejs.org/en/docs\",\n        \"estHours\": 20,\n        \"priority\": \"required\",\n        \"affiliateUrl\": null\n      },\n      {\n        \"title\": \"Kubernetes Basics by Google Cloud\",\n        \"gapReason\": \"The role mentions Kubernetes-based deployments, which is a preferred (not required) skill\",\n        \"resourceType\": \"course\",\n        \"url\": null,\n        \"estHours\": 15,\n        \"priority\": \"preferred\",\n        \"affiliateUrl\": \"https://www.udemy.com/courses/search/?q=Kubernetes%20Basics%20by%20Google%20Cloud&ranMID=test\"\n      }\n    ],\n    \"createdAt\": \"2026-07-21T09:12:30.552Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-21T09:12:30.560Z\"\n  }\n}"
             }
           ]
         }
@@ -8745,6 +9070,321 @@
               ],
               "cookie": [],
               "body": "{\n  \"success\": true,\n  \"data\": { \"status\": \"active\" },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-07-28T14:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin — Affiliate Links",
+      "item": [
+        {
+          "name": "List Affiliate Links",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/affiliate-links",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "affiliate-links"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Every configured template/override, including inactive ones. At most one row with `keyword: null` per `resourceType` — that row is the default template used when no keyword override matches."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/affiliate-links",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "affiliate-links"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": \"eef323b7-cfba-4a57-9cab-792b59a7b8a2\",\n      \"resourceType\": \"book\",\n      \"keyword\": null,\n      \"urlTemplate\": \"https://www.amazon.com/s?k={query}&tag=talentpilot-20\",\n      \"label\": \"Amazon book search (default)\",\n      \"active\": true,\n      \"priority\": 0,\n      \"createdAt\": \"2026-08-03T14:52:50.232Z\",\n      \"updatedAt\": \"2026-08-03T14:52:50.232Z\"\n    },\n    {\n      \"id\": \"af820e3e-8e27-4739-b1a4-96024c01466e\",\n      \"resourceType\": \"course\",\n      \"keyword\": \"aws\",\n      \"urlTemplate\": \"https://aws-specific-deal.example.com/{query}\",\n      \"label\": \"AWS course override\",\n      \"active\": true,\n      \"priority\": 10,\n      \"createdAt\": \"2026-08-03T14:52:50.399Z\",\n      \"updatedAt\": \"2026-08-03T14:52:50.399Z\"\n    },\n    {\n      \"id\": \"847197ef-48fa-4097-9ac5-5c7a89df9601\",\n      \"resourceType\": \"course\",\n      \"keyword\": null,\n      \"urlTemplate\": \"https://www.udemy.com/courses/search/?q={query}&ranMID=test\",\n      \"label\": \"Udemy course search (default)\",\n      \"active\": true,\n      \"priority\": 0,\n      \"createdAt\": \"2026-08-03T14:52:50.329Z\",\n      \"updatedAt\": \"2026-08-03T14:52:50.329Z\"\n    }\n  ],\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-08-03T14:52:50.533Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Affiliate Link",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resourceType\": \"course\",\n  \"keyword\": \"aws\",\n  \"urlTemplate\": \"https://aws-specific-deal.example.com/{query}\",\n  \"label\": \"AWS course override\",\n  \"priority\": 10\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/affiliate-links",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "affiliate-links"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Omit `keyword` to create the default template for a `resourceType` (at most one — a second default 409s as ALREADY_EXISTS, a DB-level partial unique index, not just an app check). `urlTemplate` must contain the literal placeholder \"{query}\", replaced with the URL-encoded roadmap item title at read time."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/affiliate-links",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "affiliate-links"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"resourceType\": \"course\",\n    \"keyword\": \"aws\",\n    \"urlTemplate\": \"https://aws-specific-deal.example.com/{query}\",\n    \"label\": \"AWS course override\",\n    \"active\": true,\n    \"priority\": 10,\n    \"id\": \"af820e3e-8e27-4739-b1a4-96024c01466e\",\n    \"createdAt\": \"2026-08-03T14:52:50.399Z\",\n    \"updatedAt\": \"2026-08-03T14:52:50.399Z\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-08-03T14:52:50.413Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request — urlTemplate missing {query}",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/affiliate-links",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "affiliate-links"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"Validation failed.\",\n    \"fields\": {\n      \"urlTemplate\": [\n        \"urlTemplate must contain the literal placeholder \\\"{query}\\\"\"\n      ]\n    }\n  },\n  \"meta\": {\n    \"requestId\": \"a61b9db5-f5d9-4009-b31e-9ba4b2c982d3\",\n    \"timestamp\": \"2026-08-03T14:52:50.472Z\"\n  }\n}"
+            },
+            {
+              "name": "409 Conflict — a default already exists for this resourceType",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/affiliate-links",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "affiliate-links"
+                  ]
+                }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"ALREADY_EXISTS\",\n    \"message\": \"That already exists.\"\n  },\n  \"meta\": {\n    \"requestId\": \"da6151b4-9986-4d1d-be7f-084f35eb4669\",\n    \"timestamp\": \"2026-08-03T14:53:13.637Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Affiliate Link",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/affiliate-links/af820e3e-8e27-4739-b1a4-96024c01466e",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "affiliate-links",
+                "af820e3e-8e27-4739-b1a4-96024c01466e"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "PATCH — only the given fields change. Any field from Create Affiliate Link is editable, including toggling `active` off without deleting the row."
+          },
+          "response": [
+            {
+              "name": "404 Not Found",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/affiliate-links/af820e3e-8e27-4739-b1a4-96024c01466e",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "affiliate-links",
+                    "af820e3e-8e27-4739-b1a4-96024c01466e"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"Affiliate link not found.\"\n  },\n  \"meta\": {\n    \"requestId\": \"3f7a1e2b-9c4d-4a2f-8e1b-7d6c5a4b3e2f\",\n    \"timestamp\": \"2026-08-03T14:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Affiliate Link",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/affiliate-links/af820e3e-8e27-4739-b1a4-96024c01466e",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "affiliate-links",
+                "af820e3e-8e27-4739-b1a4-96024c01466e"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Hard delete — nothing else references these rows by id, unlike Plan/CreditPack which are archived instead."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/affiliate-links/af820e3e-8e27-4739-b1a4-96024c01466e",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "affiliate-links",
+                    "af820e3e-8e27-4739-b1a4-96024c01466e"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"data\": { \"deleted\": true },\n  \"meta\": {\n    \"requestId\": \"cce0a2a7-3273-4d9e-ae35-7fdbbe885866\",\n    \"timestamp\": \"2026-08-03T14:54:34.717Z\"\n  }\n}"
             }
           ]
         }

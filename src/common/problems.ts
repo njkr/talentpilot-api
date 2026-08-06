@@ -313,4 +313,11 @@ export const Problems = {
       ErrorCode.SELF_ACTION_FORBIDDEN,
       'You cannot revoke your own admin access.',
     ),
+
+  // ── ATS rescoring ─────────────────────────────────────────────────────────
+  noChangesToRescore: () =>
+    new AppException(
+      ErrorCode.NO_CHANGES_TO_RESCORE,
+      'No changes since your last score — apply some suggestions first.',
+    ),
 };

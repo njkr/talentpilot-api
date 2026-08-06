@@ -1,9 +1,27 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ResumeSection } from '../../resumes/entities/resume-section.entity';
 
+// Structured companion to `violations` (which stays a plain string[] — many existing
+// regression tests assert against it with String.includes()). Lets a caller offer the
+// user something helpful instead of a silent drop: `value` is the AI's own invented
+// text, always rendered client-side as an illustrative example ("e.g. ...") the user
+// must overwrite with a real detail, never as fact.
+export interface FabricationViolation {
+  type: 'number' | 'year' | 'organisation' | 'credential' | 'keyword';
+  value: string;
+  missingFact: string;
+}
+
 export interface FabricationCheck {
   safe: boolean;
   violations: string[];
+  details: FabricationViolation[];
+}
+
+export interface NeedsInfoSummary {
+  missingFact: string;
+  exampleValue: string | null;
+  needsDirectEdit: boolean;
 }
 
 interface ExperienceItemLike {
@@ -74,6 +92,42 @@ const TECH_ACRONYMS = new Set([
 export class FabricationGuardService {
   private readonly logger = new Logger(FabricationGuardService.name);
 
+  /**
+   * Turns a failed check() into what a needs_info row should show — shared by
+   * SuggestionsService.generate() (the initial save) and
+   * ResumeVersionsService.provideDetail() (the resubmit path) so both behave
+   * identically when a keyword violation is present, rather than drifting apart.
+   *
+   * A 'keyword' violation gets different treatment than every other type: it's
+   * checked against resume.rawText, which is frozen at upload and can never contain a
+   * skill added later, so no amount of resubmitting text into provide-detail can ever
+   * satisfy it. needsDirectEdit tells the caller (and ultimately the frontend) to point
+   * the user at editing their resume directly instead of inviting a retry loop.
+   */
+  summariseForNeedsInfo(check: FabricationCheck): NeedsInfoSummary {
+    const keywordViolations = check.details.filter((d) => d.type === 'keyword');
+    if (keywordViolations.length) {
+      const skills = [...new Set(keywordViolations.map((d) => d.value))].join(
+        ', ',
+      );
+      return {
+        missingFact: `${skills} isn't evidenced anywhere in your resume — add it to your Skills section directly if it's genuinely true, then re-run suggestions. Retyping text here can't fix this.`,
+        exampleValue: null,
+        needsDirectEdit: true,
+      };
+    }
+    return {
+      // Deduped: extractNumbers() can flag the same real value more than once (e.g.
+      // "45%" and the bare "45" inside it), which would otherwise repeat the
+      // identical missing-fact description.
+      missingFact: [...new Set(check.details.map((d) => d.missingFact))].join(
+        '; ',
+      ),
+      exampleValue: check.details[0]?.value ?? null,
+      needsDirectEdit: false,
+    };
+  }
+
   check(
     newText: string,
     sourceText: string,
@@ -91,8 +145,14 @@ export class FabricationGuardService {
     // the organisation check (phrase not found verbatim) and the credential-language
     // check (word "certified" not found verbatim) for a credential that is real.
     knownCertifications: string[] = [],
+    // The JD's own gap keywords (missing/partial) for this report — deliberately narrow
+    // (not free text) so the check below can't misfire on ordinary sentence vocabulary.
+    // Optional and empty by default: callers with no keyword concept (CoverLetterService)
+    // simply never trigger check 5.
+    jdKeywords: string[] = [],
   ): FabricationCheck {
     const violations: string[] = [];
+    const details: FabricationViolation[] = [];
     const source = this.normalise(sourceText);
 
     // ── 1. NUMBERS ──
@@ -102,12 +162,25 @@ export class FabricationGuardService {
     for (const num of this.extractNumbers(newText)) {
       if (!this.sourceHasNumber(source, num)) {
         violations.push(`invented number: "${num}"`);
+        details.push({
+          type: 'number',
+          value: num,
+          missingFact:
+            'a specific metric or number (e.g. a percentage, count, or dollar amount)',
+        });
       }
     }
 
     // ── 2. YEARS / DATES ──
     for (const year of newText.match(/\b(19|20)\d{2}\b/g) ?? []) {
-      if (!source.includes(year)) violations.push(`invented year: "${year}"`);
+      if (!source.includes(year)) {
+        violations.push(`invented year: "${year}"`);
+        details.push({
+          type: 'year',
+          value: year,
+          missingFact: 'a specific year or date',
+        });
+      }
     }
 
     // ── 3. ORGANISATIONS ──
@@ -137,7 +210,14 @@ export class FabricationGuardService {
         allowedOrgs.some((o) => this.orgAppearsIn(candidate, o)) ||
         knownCertifications.some((c) => this.orgAppearsIn(candidate, c)) ||
         source.includes(this.normalise(candidate));
-      if (!known) violations.push(`unrecognised organisation: "${candidate}"`);
+      if (!known) {
+        violations.push(`unrecognised organisation: "${candidate}"`);
+        details.push({
+          type: 'organisation',
+          value: candidate,
+          missingFact: 'a specific employer, school, or organisation name',
+        });
+      }
     }
 
     // ── 4. CREDENTIAL LANGUAGE ──
@@ -158,16 +238,53 @@ export class FabricationGuardService {
       const isRealCertification = knownCertifications.some((c) =>
         this.orgAppearsIn(window, c),
       );
-      if (!isRealCertification)
+      if (!isRealCertification) {
         violations.push(`invented credential: "${word}"`);
+        details.push({
+          type: 'credential',
+          value: word,
+          missingFact: 'a specific certification or degree',
+        });
+      }
+    }
+
+    // ── 5. UNSUPPORTED SKILL/TECHNOLOGY KEYWORDS ──
+    // A named technology from the JD's own gap list that newText claims but that never
+    // appears anywhere in the original resume — the same fabrication as an invented
+    // number or employer, just for a skill. Confirmed live (2026-08-04) via a
+    // cross-workspace audit: 44 of 67 real suggestions with keywordsAdded claimed a
+    // keyword absent from the resume, several already accepted onto live resumes
+    // (Cypress, Redux, Zustand, MQTT, Unity, C#, Git) — none of checks 1-4 above catch a
+    // bare single-word skill token (the organisation check specifically requires two+
+    // capitalised words in sequence).
+    for (const keyword of jdKeywords) {
+      if (!keyword) continue;
+      const pattern = this.wordBoundaryRegex(keyword);
+      if (!pattern.test(newText)) continue; // this suggestion doesn't even claim it
+      if (!pattern.test(sourceText)) {
+        violations.push(`unsupported skill: "${keyword}"`);
+        details.push({
+          type: 'keyword',
+          value: keyword,
+          missingFact: `evidence that you have real ${keyword} experience — this isn't mentioned anywhere in your resume`,
+        });
+      }
     }
 
     if (violations.length) {
       this.logger.warn(
-        `suggestion dropped: ${violations.join('; ')} — newText="${newText.slice(0, 200)}"`,
+        `fabrication check failed: ${violations.join('; ')} — newText="${newText.slice(0, 200)}"`,
       );
     }
-    return { safe: violations.length === 0, violations };
+    return { safe: violations.length === 0, violations, details };
+  }
+
+  /** Whole-token, case-insensitive — "Git" must appear as a word, not inside "GitHub". */
+  private wordBoundaryRegex(phrase: string): RegExp {
+    return new RegExp(
+      `(^|[^a-zA-Z0-9])${this.escapeRegex(phrase)}([^a-zA-Z0-9]|$)`,
+      'i',
+    );
   }
 
   /**

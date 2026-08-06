@@ -52,6 +52,7 @@ export class PaymentConfigService implements OnModuleInit {
     'analyzeCost',
     'coverLetterRegenCost',
     'interviewFeedbackCost',
+    'rescoreCost',
     'referralsEnabled',
     'creditPacksEnabled',
   ] as const;

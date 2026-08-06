@@ -46,7 +46,7 @@ function build() {
 
   const report = { id: 'report-1', weaknesses: [] } as any;
 
-  return { service, ai, complete, ctx, report, suggestions };
+  return { service, ai, complete, ctx, report, suggestions, matches };
 }
 
 function mockOptimizer(complete: jest.Mock, suggestions: any[]) {
@@ -57,7 +57,7 @@ function mockOptimizer(complete: jest.Mock, suggestions: any[]) {
 }
 
 describe('SuggestionsService.generate', () => {
-  it('drops a suggestion that invents a metric not in the source resume', async () => {
+  it('saves a suggestion that invents a metric as needs_info instead of dropping it', async () => {
     const { service, complete, ctx, report } = build();
     mockOptimizer(complete, [
       {
@@ -74,7 +74,11 @@ describe('SuggestionsService.generate', () => {
     ]);
 
     const saved = await service.generate(ctx, report);
-    expect(saved).toHaveLength(0);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].status).toBe('needs_info');
+    expect(saved[0].oldText).toBe('Improved API performance'); // still the REAL text, anchored correctly
+    expect(saved[0].missingFact).toMatch(/metric|number/);
+    expect(saved[0].exampleValue).toBeTruthy(); // the AI's own invented value, repurposed as an example
   });
 
   it('keeps a suggestion that surfaces a number ALREADY in the resume', async () => {
@@ -99,7 +103,7 @@ describe('SuggestionsService.generate', () => {
     expect(saved[0].newText).toContain('Kubernetes');
   });
 
-  it('drops a suggestion that invents an employer', async () => {
+  it('saves a suggestion that invents an employer as needs_info instead of dropping it', async () => {
     const { service, complete, ctx, report } = build();
     mockOptimizer(complete, [
       {
@@ -115,7 +119,50 @@ describe('SuggestionsService.generate', () => {
     ]);
 
     const saved = await service.generate(ctx, report);
-    expect(saved).toHaveLength(0);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].status).toBe('needs_info');
+    expect(saved[0].missingFact).toMatch(/employer|organisation/);
+    expect(saved[0].exampleValue).toBe('Goldman Sachs');
+  });
+
+  it('saves a suggestion that claims a JD gap keyword the resume never mentions as needs_info', async () => {
+    const { service, complete, ctx, report, matches } = build();
+    matches.find.mockResolvedValue([
+      { keyword: 'Cypress', importance: 'preferred', status: 'missing' },
+    ]);
+    mockOptimizer(complete, [
+      {
+        sectionType: 'skills',
+        itemIndex: 0,
+        bulletIndex: null,
+        oldText: 'Jest',
+        newText: 'Jest, Cypress',
+        reason: 'Adds a preferred testing framework',
+        impact: 'medium',
+        keywordsAdded: ['Cypress'],
+      },
+    ]);
+    ctx.sections[0].content = [
+      {
+        company: 'Acme Corp',
+        title: 'Engineer',
+        location: null,
+        startDate: '2020',
+        endDate: null,
+        isCurrent: true,
+        highlights: ['Improved API performance'],
+      },
+    ];
+    ctx.sections.push({ sectionType: 'skills', content: ['Jest'] });
+
+    const saved = await service.generate(ctx, report);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].status).toBe('needs_info');
+    expect(saved[0].missingFact).toMatch(/Cypress/);
+    // A keyword violation can never be fixed by resubmitting text (checked against
+    // frozen rawText) — needsDirectEdit tells the frontend to point at editing the
+    // resume's Skills section directly instead of the usual provide-detail retry.
+    expect(saved[0].needsDirectEdit).toBe(true);
   });
 
   it('drops a suggestion whose oldText cannot be located in the resume', async () => {

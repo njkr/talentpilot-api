@@ -10,8 +10,16 @@ export class WorkspaceResponse {
   @ApiProperty({ nullable: true }) lastRunId: string | null;
   @ApiProperty({ nullable: true }) analyzedResumeVersion: number | null;
   @ApiProperty({ type: String, format: 'date-time' }) createdAt: Date;
+  @ApiProperty({
+    nullable: true,
+    description:
+      'The most recent AtsReport.overallScore for this workspace (across every ' +
+      'report/rescore, not just the original). null until the first analysis produces ' +
+      'a score.',
+  })
+  overallScore: number | null;
 
-  constructor(w: Workspace) {
+  constructor(w: Workspace, overallScore: number | null = null) {
     Object.assign(this, {
       id: w.id,
       name: w.name,
@@ -21,6 +29,7 @@ export class WorkspaceResponse {
       lastRunId: w.lastRunId,
       analyzedResumeVersion: w.analyzedResumeVersion,
       createdAt: w.createdAt,
+      overallScore,
     });
   }
 }

@@ -44,6 +44,13 @@ export class PaymentConfig {
   coverLetterRegenCost: number;
   @Column({ name: 'interview_feedback_cost', type: 'int', default: 1 })
   interviewFeedbackCost: number;
+  // Re-scores the CURRENT resume version against the same JD after suggestions have
+  // been applied — genuinely new AI work (a fresh embedding + the ats_grading
+  // completion), not bundled into analyzeCost, which is charged once up front before
+  // any suggestions exist. Default mirrors generate_embeddings+match_keywords+
+  // score_ats's combined STEP_MANIFEST weight (1+2+2=5).
+  @Column({ name: 'rescore_cost', type: 'int', default: 5 })
+  rescoreCost: number;
 
   // ── feature flags ──
   @Column({ name: 'referrals_enabled', default: true })

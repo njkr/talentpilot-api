@@ -17,6 +17,7 @@ import { CursorQueryDto } from '../common/dto/cursor-query.dto';
 import { decodeCursor, encodeCursor } from '../common/utils/cursor.util';
 import { AtsReport } from '../ats/entities/ats-report.entity';
 import { AtsKeywordMatch } from '../ats/entities/ats-keyword-match.entity';
+import { Resume } from '../resumes/entities/resume.entity';
 
 // Historically a hardcoded 21 (sum of every step's creditWeight in STEP_MANIFEST,
 // Sprints 5-8) — now admin-editable via PaymentConfig.analyzeCost (Sprint 13; see
@@ -46,7 +47,10 @@ export class WorkspacesService {
     private readonly atsReports: Repository<AtsReport>,
     @InjectRepository(AtsKeywordMatch)
     private readonly keywordMatches: Repository<AtsKeywordMatch>,
+    @InjectRepository(Resume)
+    private readonly resumes: Repository<Resume>,
     @InjectQueue('pipeline') private readonly queue: Queue,
+    @InjectQueue('rescore') private readonly rescoreQueue: Queue,
     private readonly resumesService: ResumesService,
     private readonly jdsService: JobDescriptionsService,
     private readonly credits: CreditService,
@@ -97,8 +101,26 @@ export class WorkspacesService {
     const rows = await qb.getMany();
     const hasMore = rows.length > q.limit;
     const data = hasMore ? rows.slice(0, q.limit) : rows;
+
+    // Latest overallScore per workspace, batched in ONE query for the whole page (not
+    // per-row) to avoid N+1. Rows arrive newest-first, so the first-seen row per
+    // workspace is its latest report — same idea as getReport()'s original/latest
+    // split, just picking the latest instead of the first.
+    const scores = new Map<string, number>();
+    if (data.length) {
+      const reports = await this.atsReports.find({
+        where: { workspaceId: In(data.map((w) => w.id)) },
+        order: { createdAt: 'DESC' },
+      });
+      for (const r of reports) {
+        if (!scores.has(r.workspaceId))
+          scores.set(r.workspaceId, r.overallScore);
+      }
+    }
+
     return {
       data,
+      scores,
       hasMore,
       nextCursor: hasMore ? encodeCursor(data.at(-1)!) : null,
     };
@@ -254,7 +276,11 @@ export class WorkspacesService {
   async getReport(
     workspaceId: string,
     userId: string,
-  ): Promise<{ report: AtsReport; keywords: AtsKeywordMatch[] }> {
+  ): Promise<{
+    report: AtsReport;
+    keywords: AtsKeywordMatch[];
+    original: AtsReport | null;
+  }> {
     const ws = await this.findOwned(workspaceId, userId);
     const report = await this.atsReports.findOne({
       where: { workspaceId },
@@ -264,6 +290,51 @@ export class WorkspacesService {
     const keywords = await this.keywordMatches.find({
       where: { atsReportId: report.id },
     });
-    return { report, keywords };
+    // The FIRST report ever generated for this workspace — the "before" score. Same
+    // row as `report` until a rescore has actually run (null-safe: `report` itself
+    // is never null here, `original` degrades to it via the id check below).
+    const first = await this.atsReports.findOne({
+      where: { workspaceId },
+      order: { createdAt: 'ASC' },
+    });
+    const original = first && first.id !== report.id ? first : null;
+    return { report, keywords, original };
+  }
+
+  /**
+   * Re-scores the CURRENT resume version against the same JD — genuinely new AI work
+   * (a fresh embedding + the ats_grading completion), so it's a separate, explicit,
+   * user-initiated charge (PaymentConfig.rescoreCost) rather than automatic after
+   * every apply — a user may apply suggestions in several small batches and only want
+   * to pay for one recalculation at the end. Runs worker-side (RescoreProcessor) —
+   * same AI/embeddings process boundary every pipeline step already respects.
+   */
+  async rescore(
+    workspaceId: string,
+    userId: string,
+  ): Promise<{ queued: true }> {
+    const ws = await this.findOwned(workspaceId, userId);
+    const resume = await this.resumes.findOneOrFail({
+      where: { id: ws.resumeId },
+    });
+
+    const lastReport = await this.atsReports.findOne({
+      where: { workspaceId },
+      order: { createdAt: 'DESC' },
+    });
+    if (!lastReport) throw Problems.reportNotReady(ws.status);
+    if (lastReport.resumeVersion === resume.currentVersion) {
+      throw Problems.noChangesToRescore();
+    }
+
+    const rescoreCost = (await this.paymentConfig.get()).rescoreCost;
+    const balance = await this.credits.balance(userId);
+    if (balance < rescoreCost) {
+      throw Problems.insufficientCredits(rescoreCost, balance);
+    }
+    await this.credits.debit(userId, rescoreCost, 'rescore', workspaceId);
+
+    await this.rescoreQueue.add('rescore', { workspaceId, userId });
+    return { queued: true };
   }
 }

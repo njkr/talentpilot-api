@@ -92,7 +92,41 @@ function build() {
   const suggestions = { find: jest.fn(), update: jest.fn() };
   const workspaces = { findOne: jest.fn() };
   const generatedDocuments = {};
+  const atsReports = { findOne: jest.fn().mockResolvedValue(null) };
+  const atsKeywordMatches = { find: jest.fn().mockResolvedValue([]) };
   const dataSource = { transaction: jest.fn() };
+  const guard = {
+    collectKnownOrgs: jest.fn().mockReturnValue([]),
+    collectKnownCertifications: jest.fn().mockReturnValue([]),
+    check: jest
+      .fn()
+      .mockReturnValue({ safe: true, violations: [], details: [] }),
+    // Mirrors the real FabricationGuardService.summariseForNeedsInfo() closely enough
+    // for these tests: a keyword-type detail gets the direct-edit message, anything
+    // else gets the generic deduped-join behaviour.
+    summariseForNeedsInfo: jest.fn((check: any) => {
+      const keywordViolations = check.details.filter(
+        (d: any) => d.type === 'keyword',
+      );
+      if (keywordViolations.length) {
+        const skills = [
+          ...new Set(keywordViolations.map((d: any) => d.value)),
+        ].join(', ');
+        return {
+          missingFact: `${skills} isn't evidenced anywhere in your resume — add it to your Skills section directly if it's genuinely true, then re-run suggestions. Retyping text here can't fix this.`,
+          exampleValue: null,
+          needsDirectEdit: true,
+        };
+      }
+      return {
+        missingFact: [
+          ...new Set(check.details.map((d: any) => d.missingFact)),
+        ].join('; '),
+        exampleValue: check.details[0]?.value ?? null,
+        needsDirectEdit: false,
+      };
+    }),
+  };
 
   const service = new ResumeVersionsService(
     resumes as any,
@@ -101,7 +135,10 @@ function build() {
     suggestions as any,
     workspaces as any,
     generatedDocuments as any,
+    atsReports as any,
+    atsKeywordMatches as any,
     dataSource as any,
+    guard as any,
   );
   return {
     service,
@@ -110,7 +147,10 @@ function build() {
     versions,
     suggestions,
     workspaces,
+    atsReports,
+    atsKeywordMatches,
     dataSource,
+    guard,
   };
 }
 
@@ -281,5 +321,118 @@ describe('ResumeVersionsService.restore', () => {
     );
 
     await expect(service.restore('resume-1', 'user-1', 99)).rejects.toThrow();
+  });
+});
+
+describe('ResumeVersionsService.provideDetail', () => {
+  function buildForProvideDetail() {
+    const built = build();
+    built.workspaces.findOne.mockResolvedValue({
+      id: 'ws-1',
+      userId: 'user-1',
+      resumeId: 'resume-1',
+    });
+    built.resumes.findOne.mockResolvedValue({
+      id: 'resume-1',
+      userId: 'user-1',
+      currentVersion: 1,
+      rawText: 'Some resume text',
+    });
+    built.sections.find.mockResolvedValue([]);
+    (built.suggestions as any).findOne = jest.fn().mockResolvedValue(
+      suggestion({
+        status: 'needs_info',
+        newText: 'e.g. improved performance by 40%',
+        missingFact: 'a specific metric or number',
+        exampleValue: '40%',
+      }),
+    );
+    (built.suggestions as any).save = jest.fn((s: unknown) =>
+      Promise.resolve(s),
+    );
+    return built;
+  }
+
+  it('flips to pending and clears missingFact/exampleValue when the user-submitted text passes the guard', async () => {
+    const { service, guard, suggestions } = buildForProvideDetail();
+    guard.check.mockReturnValue({ safe: true, violations: [], details: [] });
+
+    const result = await service.provideDetail(
+      'ws-1',
+      'user-1',
+      'sug-1',
+      'Improved performance by 40%',
+    );
+
+    expect(result.status).toBe('pending');
+    expect(result.missingFact).toBeNull();
+    expect(result.exampleValue).toBeNull();
+    expect(result.newText).toBe('Improved performance by 40%');
+    expect((suggestions as any).save).toHaveBeenCalled();
+  });
+
+  it('stays needs_info with updated guidance if the user-submitted text still fails the guard', async () => {
+    const { service, guard } = buildForProvideDetail();
+    guard.check.mockReturnValue({
+      safe: false,
+      violations: ['unrecognised organisation: "Wayne Enterprises"'],
+      details: [
+        {
+          type: 'organisation',
+          value: 'Wayne Enterprises',
+          missingFact: 'a specific employer, school, or organisation name',
+        },
+      ],
+    });
+
+    const result = await service.provideDetail(
+      'ws-1',
+      'user-1',
+      'sug-1',
+      'Worked at Wayne Enterprises',
+    );
+
+    expect(result.status).toBe('needs_info');
+    expect(result.exampleValue).toBe('Wayne Enterprises');
+    expect(result.missingFact).toContain('organisation');
+  });
+
+  it('404s when there is no needs_info suggestion with that id', async () => {
+    const { service, suggestions } = buildForProvideDetail();
+    (suggestions as any).findOne = jest.fn().mockResolvedValue(null);
+
+    await expect(
+      service.provideDetail('ws-1', 'user-1', 'ghost', 'anything'),
+    ).rejects.toThrow();
+  });
+
+  it('points to direct resume editing instead of generic guidance for a keyword-type violation — retyping into this box can never satisfy it against the frozen rawText', async () => {
+    const { service, guard } = buildForProvideDetail();
+    guard.check.mockReturnValue({
+      safe: false,
+      violations: ['unsupported skill: "Cypress"'],
+      details: [
+        {
+          type: 'keyword',
+          value: 'Cypress',
+          missingFact:
+            "evidence that you have real Cypress experience — this isn't mentioned anywhere in your resume",
+        },
+      ],
+    });
+
+    const result = await service.provideDetail(
+      'ws-1',
+      'user-1',
+      'sug-1',
+      'Jest, Cypress',
+    );
+
+    expect(result.status).toBe('needs_info');
+    expect(result.missingFact).toContain('Cypress');
+    expect(result.missingFact).toMatch(
+      /add it to your Skills section directly/,
+    );
+    expect(result.exampleValue).toBeNull();
   });
 });

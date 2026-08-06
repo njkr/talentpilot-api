@@ -70,12 +70,12 @@ export class WorkspacesController {
     isArray: true,
   })
   async list(@CurrentUser() user: User, @Query() q: CursorQueryDto) {
-    const { data, hasMore, nextCursor } = await this.workspaces.list(
+    const { data, scores, hasMore, nextCursor } = await this.workspaces.list(
       user.id,
       q,
     );
     return {
-      data: data.map((w) => new WorkspaceResponse(w)),
+      data: data.map((w) => new WorkspaceResponse(w, scores.get(w.id) ?? null)),
       hasMore,
       nextCursor,
     };
@@ -260,8 +260,32 @@ export class WorkspacesController {
     @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    const { report, keywords } = await this.workspaces.getReport(id, user.id);
-    return new AtsReportResponse(report, keywords);
+    const { report, keywords, original } = await this.workspaces.getReport(
+      id,
+      user.id,
+    );
+    return new AtsReportResponse(report, keywords, original);
+  }
+
+  @Post(':id/rescore')
+  @ApiOperation({
+    summary: 'Re-score the current resume version against the same JD',
+    description:
+      'Genuinely new AI work (a fresh embedding + AI grading pass), charged separately ' +
+      'from the original analysis via `PaymentConfig.rescoreCost`. Runs asynchronously — ' +
+      'poll `GET :id/report` for the new report once queued. Rejects if the resume has ' +
+      'not changed since the last report (NO_CHANGES_TO_RESCORE).',
+  })
+  @ApiErrorResponses({
+    402: 'Insufficient credits (INSUFFICIENT_CREDITS).',
+    404: 'No workspace with that id belongs to the current user.',
+    409: 'No completed analysis yet (REPORT_NOT_READY), or the resume has not changed since the last report (NO_CHANGES_TO_RESCORE).',
+  })
+  async rescore(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.workspaces.rescore(id, user.id);
   }
 
   @Delete(':id')

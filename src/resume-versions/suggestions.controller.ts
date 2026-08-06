@@ -17,6 +17,7 @@ import {
 import { ResumeVersionsService } from './resume-versions.service';
 import { SuggestionResponse } from './dto/suggestion-response.dto';
 import { SuggestionIdsDto } from './dto/suggestion-ids.dto';
+import { ProvideSuggestionDetailDto } from './dto/provide-suggestion-detail.dto';
 
 /**
  * Read/apply/reject already-generated suggestions — no AI call happens here.
@@ -38,7 +39,8 @@ export class SuggestionsController {
   async list(
     @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
-    @Query('status') status?: 'pending' | 'accepted' | 'rejected' | 'stale',
+    @Query('status')
+    status?: 'pending' | 'accepted' | 'rejected' | 'stale' | 'needs_info',
   ) {
     const rows = await this.versions.listSuggestions(
       id,
@@ -84,5 +86,34 @@ export class SuggestionsController {
       dto.suggestionIds,
     );
     return { rejected: count };
+  }
+
+  @Post(':suggestionId/provide-detail')
+  @ApiOperation({
+    summary:
+      'Supply your own real text for a "needs_info" suggestion, replacing its ' +
+      'illustrative example',
+    description:
+      'Re-runs the same fabrication check on your submitted text. If it passes, the ' +
+      'suggestion becomes a normal `pending` suggestion; if it still asserts an ' +
+      'ungrounded fact, it stays `needs_info` with updated guidance.',
+  })
+  @ApiDataResponse(200, SuggestionResponse, 'The updated suggestion.')
+  @ApiErrorResponses({
+    404: 'No workspace with that id belongs to the current user, or no needs_info suggestion with that id.',
+  })
+  async provideDetail(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('suggestionId', ParseUUIDPipe) suggestionId: string,
+    @Body() dto: ProvideSuggestionDetailDto,
+  ) {
+    const suggestion = await this.versions.provideDetail(
+      id,
+      user.id,
+      suggestionId,
+      dto.newText,
+    );
+    return new SuggestionResponse(suggestion);
   }
 }

@@ -99,6 +99,9 @@ export const ErrorCode = {
 
   // admin (user management)
   SELF_ACTION_FORBIDDEN: 'SELF_ACTION_FORBIDDEN', // an admin tried to revoke their own access
+
+  // ATS rescoring
+  NO_CHANGES_TO_RESCORE: 'NO_CHANGES_TO_RESCORE', // resume unchanged since the last report
 } as const;
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 
@@ -151,6 +154,7 @@ const STATUS: Record<string, number> = {
   ALREADY_SUBSCRIBED: 409,
   SUBSCRIPTION_UPDATE_FAILED: 502, // a downstream (Stripe) failure, not the client's fault
   SELF_ACTION_FORBIDDEN: 400,
+  NO_CHANGES_TO_RESCORE: 409,
 };
 
 export class AppException extends HttpException {

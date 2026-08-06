@@ -53,7 +53,28 @@ export class AiSuggestion {
   keywordsAdded: string[];
 
   @Column({ type: 'varchar', default: 'pending' })
-  status: 'pending' | 'accepted' | 'rejected' | 'stale';
+  status: 'pending' | 'accepted' | 'rejected' | 'stale' | 'needs_info';
+
+  // Populated only when status is (or was) 'needs_info' — FabricationGuardService
+  // rejected newText because it asserted a fact (a number, org, credential) not
+  // present in the source resume. missingFact describes what kind of real detail
+  // would fix it; exampleValue is the AI's OWN invented text, preserved so the user
+  // has something concrete to react to — always rendered client-side as an
+  // illustrative example ("e.g. ...") they must overwrite, never as fact. Multiple
+  // violations in one suggestion are joined with "; " (see SuggestionsService).
+  @Column({ name: 'missing_fact', type: 'text', nullable: true })
+  missingFact: string | null;
+  @Column({ name: 'example_value', type: 'text', nullable: true })
+  exampleValue: string | null;
+
+  // True only for a 'keyword' fabrication violation (an unsupported skill/technology
+  // claim) — the ONE needs_info case that can never be resolved by resubmitting text
+  // via provide-detail, since it's checked against resume.rawText, which is frozen at
+  // upload and can never contain a skill added later. The frontend needs this as a
+  // structured flag rather than parsing missingFact's wording, so it can point the user
+  // at the resume's direct section-edit page instead of the usual text-box retry.
+  @Column({ name: 'needs_direct_edit', type: 'boolean', default: false })
+  needsDirectEdit: boolean;
 
   @Column({ name: 'applied_version', type: 'int', nullable: true })
   appliedVersion: number | null;

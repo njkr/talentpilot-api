@@ -15,17 +15,26 @@ function build() {
     update: jest.fn().mockResolvedValue(undefined),
   };
   const stepRows = { find: jest.fn().mockResolvedValue([]) };
-  const atsReports = { findOne: jest.fn() };
+  const atsReports = {
+    findOne: jest.fn(),
+    find: jest.fn().mockResolvedValue([]),
+  };
   const keywordMatches = { find: jest.fn().mockResolvedValue([]) };
+  const resumes = { findOne: jest.fn(), findOneOrFail: jest.fn() };
   const queue = { add: jest.fn().mockResolvedValue(undefined) };
+  const rescoreQueue = { add: jest.fn().mockResolvedValue(undefined) };
   const resumesService = { findOwned: jest.fn().mockResolvedValue({}) };
   const jdsService = { findOwned: jest.fn().mockResolvedValue({}) };
-  const credits = { balance: jest.fn(), debitWithin: jest.fn() };
+  const credits = {
+    balance: jest.fn(),
+    debitWithin: jest.fn(),
+    debit: jest.fn().mockResolvedValue(undefined),
+  };
   const planLimits = {
     assertCanCreateWorkspace: jest.fn().mockResolvedValue(undefined),
   };
   const paymentConfig = {
-    get: jest.fn().mockResolvedValue({ analyzeCost: 21 }),
+    get: jest.fn().mockResolvedValue({ analyzeCost: 21, rescoreCost: 5 }),
   };
   const dataSource = { transaction: jest.fn() };
 
@@ -35,7 +44,9 @@ function build() {
     stepRows as any,
     atsReports as any,
     keywordMatches as any,
+    resumes as any,
     queue as any,
+    rescoreQueue as any,
     resumesService as any,
     jdsService as any,
     credits as any,
@@ -49,8 +60,11 @@ function build() {
     runs,
     atsReports,
     keywordMatches,
+    resumes,
     queue,
+    rescoreQueue,
     credits,
+    paymentConfig,
     dataSource,
   };
 }
@@ -186,6 +200,83 @@ describe('WorkspacesService.analyze', () => {
   });
 });
 
+// Chainable stand-in for TypeORM's QueryBuilder — every method list() calls returns
+// `this`, and getMany() resolves to whatever rows the test configures.
+function fakeQueryBuilder(rows: any[]) {
+  const qb: any = {
+    where: jest.fn(() => qb),
+    andWhere: jest.fn(() => qb),
+    orderBy: jest.fn(() => qb),
+    addOrderBy: jest.fn(() => qb),
+    take: jest.fn(() => qb),
+    getMany: jest.fn().mockResolvedValue(rows),
+  };
+  return qb;
+}
+
+describe('WorkspacesService.list', () => {
+  it("attaches each workspace its latest report's overallScore", async () => {
+    const { service, workspaces, atsReports } = build();
+    workspaces.createQueryBuilder.mockReturnValue(
+      fakeQueryBuilder([{ id: 'ws-1', createdAt: new Date() }]),
+    );
+    atsReports.find.mockResolvedValue([
+      { workspaceId: 'ws-1', overallScore: 72, createdAt: new Date() },
+    ]);
+
+    const { data, scores } = await service.list('user-1', { limit: 20 } as any);
+
+    expect(data).toHaveLength(1);
+    expect(scores.get('ws-1')).toBe(72);
+  });
+
+  it('has no entry in scores for a workspace with no report yet', async () => {
+    const { service, workspaces, atsReports } = build();
+    workspaces.createQueryBuilder.mockReturnValue(
+      fakeQueryBuilder([{ id: 'ws-1', createdAt: new Date() }]),
+    );
+    atsReports.find.mockResolvedValue([]);
+
+    const { scores } = await service.list('user-1', { limit: 20 } as any);
+
+    expect(scores.has('ws-1')).toBe(false);
+  });
+
+  it("uses the LATEST report's score, not the original, when a workspace has been rescored", async () => {
+    const { service, workspaces, atsReports } = build();
+    workspaces.createQueryBuilder.mockReturnValue(
+      fakeQueryBuilder([{ id: 'ws-1', createdAt: new Date() }]),
+    );
+    // find() is ordered createdAt DESC, so the latest report is listed first — same
+    // assumption list() relies on to pick "first seen wins" per workspace.
+    atsReports.find.mockResolvedValue([
+      {
+        workspaceId: 'ws-1',
+        overallScore: 85,
+        createdAt: new Date('2026-08-05'),
+      },
+      {
+        workspaceId: 'ws-1',
+        overallScore: 69,
+        createdAt: new Date('2026-08-01'),
+      },
+    ]);
+
+    const { scores } = await service.list('user-1', { limit: 20 } as any);
+
+    expect(scores.get('ws-1')).toBe(85);
+  });
+
+  it('skips the extra report query entirely for an empty page', async () => {
+    const { service, workspaces, atsReports } = build();
+    workspaces.createQueryBuilder.mockReturnValue(fakeQueryBuilder([]));
+
+    await service.list('user-1', { limit: 20 } as any);
+
+    expect(atsReports.find).not.toHaveBeenCalled();
+  });
+});
+
 describe('WorkspacesService.retry', () => {
   it('throws RUN_NOT_RETRYABLE for a run that is not failed/partial', async () => {
     const { service, runs } = build();
@@ -260,5 +351,112 @@ describe('WorkspacesService.getReport', () => {
     });
     expect(result.report.overallScore).toBe(72);
     expect(result.keywords).toEqual([{ keyword: 'Go', status: 'matched' }]);
+    expect(result.original).toBeNull(); // only one report exists — same row both ways
+  });
+
+  it('returns a distinct "original" report once a rescore has produced a second, later one', async () => {
+    const { service, workspaces, atsReports, keywordMatches } = build();
+    workspaces.findOne.mockResolvedValue({
+      id: 'ws-1',
+      userId: 'user-1',
+      status: 'completed',
+    });
+    const original = { id: 'report-1', workspaceId: 'ws-1', overallScore: 50 };
+    const latest = { id: 'report-2', workspaceId: 'ws-1', overallScore: 88 };
+    atsReports.findOne
+      .mockResolvedValueOnce(latest) // order: createdAt DESC
+      .mockResolvedValueOnce(original); // order: createdAt ASC
+    keywordMatches.find.mockResolvedValue([]);
+
+    const result = await service.getReport('ws-1', 'user-1');
+
+    expect(result.report.overallScore).toBe(88);
+    expect(result.original?.overallScore).toBe(50);
+  });
+});
+
+describe('WorkspacesService.rescore', () => {
+  it('throws NO_CHANGES_TO_RESCORE when the resume version matches the last report', async () => {
+    const { service, workspaces, resumes, atsReports } = build();
+    workspaces.findOne.mockResolvedValue({
+      id: 'ws-1',
+      userId: 'user-1',
+      resumeId: 'resume-1',
+    });
+    resumes.findOneOrFail.mockResolvedValue({
+      id: 'resume-1',
+      currentVersion: 1,
+    });
+    atsReports.findOne.mockResolvedValue({ resumeVersion: 1 });
+
+    await expect(service.rescore('ws-1', 'user-1')).rejects.toMatchObject({
+      code: 'NO_CHANGES_TO_RESCORE',
+    });
+  });
+
+  it('throws REPORT_NOT_READY when no report exists yet', async () => {
+    const { service, workspaces, resumes, atsReports } = build();
+    workspaces.findOne.mockResolvedValue({
+      id: 'ws-1',
+      userId: 'user-1',
+      resumeId: 'resume-1',
+      status: 'queued',
+    });
+    resumes.findOneOrFail.mockResolvedValue({
+      id: 'resume-1',
+      currentVersion: 2,
+    });
+    atsReports.findOne.mockResolvedValue(null);
+
+    await expect(service.rescore('ws-1', 'user-1')).rejects.toMatchObject({
+      code: 'REPORT_NOT_READY',
+    });
+  });
+
+  it('throws INSUFFICIENT_CREDITS without debiting or enqueuing', async () => {
+    const { service, workspaces, resumes, atsReports, credits, rescoreQueue } =
+      build();
+    workspaces.findOne.mockResolvedValue({
+      id: 'ws-1',
+      userId: 'user-1',
+      resumeId: 'resume-1',
+    });
+    resumes.findOneOrFail.mockResolvedValue({
+      id: 'resume-1',
+      currentVersion: 2,
+    });
+    atsReports.findOne.mockResolvedValue({ resumeVersion: 1 });
+    credits.balance.mockResolvedValue(2); // less than rescoreCost (5)
+
+    await expect(service.rescore('ws-1', 'user-1')).rejects.toMatchObject({
+      code: 'INSUFFICIENT_CREDITS',
+    });
+    expect(credits.debit).not.toHaveBeenCalled();
+    expect(rescoreQueue.add).not.toHaveBeenCalled();
+  });
+
+  it('debits rescoreCost and enqueues a rescore job when the resume actually changed', async () => {
+    const { service, workspaces, resumes, atsReports, credits, rescoreQueue } =
+      build();
+    workspaces.findOne.mockResolvedValue({
+      id: 'ws-1',
+      userId: 'user-1',
+      resumeId: 'resume-1',
+    });
+    resumes.findOneOrFail.mockResolvedValue({
+      id: 'resume-1',
+      currentVersion: 2,
+    });
+    atsReports.findOne.mockResolvedValue({ resumeVersion: 1 });
+    credits.balance.mockResolvedValue(100);
+
+    const result = await service.rescore('ws-1', 'user-1');
+
+    expect(result).toEqual({ queued: true });
+    expect(credits.debit).toHaveBeenCalledWith('user-1', 5, 'rescore', 'ws-1');
+    expect(rescoreQueue.add).toHaveBeenCalledWith('rescore', {
+      workspaceId: 'ws-1',
+      userId: 'user-1',
+    });
   });
 });

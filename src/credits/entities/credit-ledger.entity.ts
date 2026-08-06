@@ -13,6 +13,7 @@ export type CreditReason =
   | 'grant'
   | 'cover_letter_regenerate'
   | 'answer_feedback'
+  | 'rescore' // re-score the current resume version after applying suggestions
   // ── Sprint 10: payments ──
   | 'monthly_refill' // granted on invoice.payment_succeeded for a paid plan
   | 'purchase' // one-off credit top-up (not plan-linked)

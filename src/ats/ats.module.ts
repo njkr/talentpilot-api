@@ -36,6 +36,14 @@ import { MatchingController } from './matching.controller';
   ],
   // Exported for the pipeline's MatchKeywordsStep/ScoreAtsStep (worker-side), which
   // reuse these directly rather than going through MatchingFacade's bundled embed+match.
-  exports: [SemanticScorerService, KeywordMatcherService, AtsService],
+  // MatchingFacade itself is exported for RescoreProcessor (worker-side too), which
+  // DOES want the bundled embed+match+score-prep — a rescore is exactly "score one
+  // resume against one JD again", the one case the facade's own doc comment describes.
+  exports: [
+    SemanticScorerService,
+    KeywordMatcherService,
+    AtsService,
+    MatchingFacade,
+  ],
 })
 export class AtsModule {}

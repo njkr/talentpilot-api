@@ -350,4 +350,163 @@ describe('FabricationGuardService', () => {
       },
     );
   });
+
+  describe('details (structured companion to violations)', () => {
+    it('carries the invented number as a "number" detail with its value and what fact is missing', () => {
+      const result = guard.check(
+        'Improved API performance by 45%, reducing latency for 2M users',
+        'Improved API performance for our main service',
+        [],
+      );
+      expect(result.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'number', value: '45%' }),
+        ]),
+      );
+      expect(
+        result.details.find((d) => d.value === '45%')?.missingFact,
+      ).toMatch(/metric|number/);
+    });
+
+    it('carries an invented organisation as an "organisation" detail', () => {
+      const result = guard.check(
+        'Collaborated with Goldman Sachs on a trading platform',
+        'Built a trading platform for internal use',
+        ['Acme Corp'],
+      );
+      expect(result.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'organisation',
+            value: 'Goldman Sachs',
+          }),
+        ]),
+      );
+    });
+
+    it('carries an invented credential as a "credential" detail', () => {
+      const result = guard.check(
+        'Certified AWS Solutions Architect with deployment experience',
+        'Deployed services to AWS regularly',
+        [],
+      );
+      expect(result.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'credential', value: 'Certified' }),
+        ]),
+      );
+    });
+
+    it('is an empty array when the text is safe', () => {
+      const result = guard.check(
+        'Led migration of 40 microservices to Kubernetes',
+        'Led migration for 40 microservices',
+        [],
+      );
+      expect(result.safe).toBe(true);
+      expect(result.details).toEqual([]);
+    });
+  });
+
+  // ── Found live 2026-08-04: none of checks 1-4 catch a bare single-word skill
+  // token, since the organisation check requires two+ capitalised words in sequence.
+  // A cross-workspace audit found 44 real suggestions claiming a keyword absent from
+  // the resume, several already accepted onto live resumes (Cypress, Redux, Unity).
+  describe('unsupported skill/technology keywords (6th arg: jdKeywords)', () => {
+    it('flags a JD keyword claimed in newText but absent from the whole resume', () => {
+      const result = guard.check(
+        'Jest, Cypress',
+        'Experienced with Jest for unit testing.',
+        [],
+        [],
+        [],
+        ['Cypress'],
+      );
+      expect(result.safe).toBe(false);
+      expect(result.violations.some((v) => v.includes('Cypress'))).toBe(true);
+      expect(result.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'keyword', value: 'Cypress' }),
+        ]),
+      );
+    });
+
+    it('does not flag "GitHub" as evidence for a bare "Git" claim (whole-token match)', () => {
+      const result = guard.check(
+        'Automated CI/CD pipelines with GitHub Actions and Git.',
+        'Automated CI/CD pipelines with GitHub Actions.',
+        [],
+        [],
+        [],
+        ['Git'],
+      );
+      expect(result.safe).toBe(false);
+      expect(result.violations.some((v) => v.includes('"Git"'))).toBe(true);
+    });
+
+    it('accepts a JD keyword that is genuinely evidenced elsewhere in the resume', () => {
+      const result = guard.check(
+        'Skilled in Git version control for collaborative development.',
+        'Experience using Git for version control across all projects.',
+        [],
+        [],
+        [],
+        ['Git'],
+      );
+      expect(result.safe).toBe(true);
+    });
+
+    it('does not flag a JD keyword the suggestion never actually claims', () => {
+      const result = guard.check(
+        'Spearheaded backend development for the core platform',
+        'Led backend development for the core platform',
+        [],
+        [],
+        [],
+        ['Unity', 'C#'],
+      );
+      expect(result.safe).toBe(true);
+    });
+
+    it('stays backward compatible when jdKeywords is omitted', () => {
+      const result = guard.check(
+        'Jest, Cypress',
+        'Experienced with Jest for unit testing.',
+        [],
+      );
+      expect(result.safe).toBe(true);
+    });
+  });
+
+  describe('summariseForNeedsInfo', () => {
+    it('flags needsDirectEdit for a keyword violation, with skill-specific direct-edit guidance', () => {
+      const check = guard.check(
+        'Jest, Cypress',
+        'Experienced with Jest for unit testing.',
+        [],
+        [],
+        [],
+        ['Cypress'],
+      );
+      const summary = guard.summariseForNeedsInfo(check);
+      expect(summary.needsDirectEdit).toBe(true);
+      expect(summary.exampleValue).toBeNull();
+      expect(summary.missingFact).toContain('Cypress');
+      expect(summary.missingFact).toMatch(
+        /add it to your Skills section directly/,
+      );
+    });
+
+    it('does not flag needsDirectEdit for a non-keyword violation (falls back to generic guidance)', () => {
+      const check = guard.check(
+        'Collaborated with Goldman Sachs on a trading platform',
+        'Built a trading platform for internal use',
+        ['Acme Corp'],
+      );
+      const summary = guard.summariseForNeedsInfo(check);
+      expect(summary.needsDirectEdit).toBe(false);
+      expect(summary.exampleValue).toBe('Goldman Sachs');
+      expect(summary.missingFact).toContain('organisation');
+    });
+  });
 });

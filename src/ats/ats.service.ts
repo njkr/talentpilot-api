@@ -144,6 +144,7 @@ export class AtsService {
       this.reports.create({
         workspaceId: ctx.workspaceId,
         runId: ctx.runId,
+        resumeVersion: ctx.resumeVersion,
         overallScore: overall,
         keywordScore: keyword.score,
         semanticScore: semantic,
