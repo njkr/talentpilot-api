@@ -50,10 +50,24 @@ export class AuthController {
   ) {}
 
   private setRefreshCookie(res: Response, raw: string) {
+    // COOKIE_CROSS_SITE overrides this independent of NODE_ENV — e.g. a local backend
+    // tunnelled (ngrok) to a deployed frontend is cross-site even in dev. Deliberately
+    // NOT tied to DATABASE_SSL: which origins the frontend lives on and whether the DB
+    // needs TLS are unrelated facts about an environment.
+    const crossSite =
+      this.env.get('COOKIE_CROSS_SITE') ??
+      this.env.get('NODE_ENV') === 'production';
     res.cookie(REFRESH_COOKIE, raw, {
       httpOnly: true, // JS cannot read it → XSS cannot steal the session
-      secure: this.env.get('NODE_ENV') === 'production',
-      sameSite: 'strict', // CSRF protection for the refresh endpoint
+      secure: crossSite,
+      // 'strict'/'lax' only work when frontend and API share a site — cross-site
+      // deployments (e.g. Vercel + Render, or this ngrok test) never send it
+      // otherwise, since 'lax' only allows top-level navigation, not fetch/XHR.
+      // 'none' requires secure:true (browsers reject SameSite=None without it,
+      // which is why both flip together). The CORS allowlist (APP_URL/
+      // CORS_ORIGINS, credentials:true) is what actually restricts which origins
+      // can complete the round trip, not the cookie's SameSite value.
+      sameSite: crossSite ? 'none' : 'lax',
       path: '/api/v1/auth', // never sent to any other route
       maxAge: this.env.get('REFRESH_TTL_DAYS') * 86_400_000,
     });

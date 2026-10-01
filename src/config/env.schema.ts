@@ -10,9 +10,20 @@ export const envSchema = z.object({
   // device on the LAN via the host machine's IP. APP_URL itself is always allowed and is
   // still what email links/Stripe redirects use; this only widens the CORS allowlist.
   CORS_ORIGINS: z.string().optional(),
+  // Overrides the refresh cookie's sameSite/secure logic (see AuthController.
+  // setRefreshCookie). Undefined -> falls back to NODE_ENV === 'production'. Set this
+  // explicitly (independent of NODE_ENV) whenever the frontend and API are on different
+  // origins but you're NOT otherwise running in "production" mode — e.g. a local backend
+  // tunnelled via ngrok to a deployed frontend for testing.
+  COOKIE_CROSS_SITE: z.stringbool().optional(),
 
   DATABASE_URL: z.string().url(),
   DB_POOL_SIZE: z.coerce.number().default(10),
+  // Overrides whether the Postgres connection requires TLS (see data-source.ts).
+  // Undefined -> falls back to NODE_ENV === 'production'. Independent of
+  // COOKIE_CROSS_SITE on purpose: a managed Postgres (Neon, RDS) needing TLS and a
+  // cross-origin frontend are unrelated facts about a given environment.
+  DATABASE_SSL: z.stringbool().optional(),
   REDIS_URL: z.string().url(),
 
   JWT_ACCESS_SECRET: z.string().min(32),

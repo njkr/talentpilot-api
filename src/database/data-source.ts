@@ -42,10 +42,24 @@ import { AffiliateLink } from '../affiliate-links/entities/affiliate-link.entity
 //  - the TypeORM CLI (migration:generate / migration:run / migration:revert)
 // The CLI has no Nest DI container, so this reads process.env directly
 // (via dotenv/config) rather than through the Env service.
+
+// Managed Postgres (Neon, RDS, etc.) requires TLS and presents a cert not in Node's
+// default trust store — rejectUnauthorized:false skips CA verification (fine here:
+// the connection is still encrypted, and DATABASE_URL itself is the actual secret
+// boundary). Local docker-compose Postgres has no TLS listener at all, so this must
+// stay off unless DATABASE_URL actually points at one. DATABASE_SSL overrides the
+// NODE_ENV-based default independent of COOKIE_CROSS_SITE (see env.schema.ts) — e.g.
+// a local backend with a local DB can still need cross-site cookies without needing DB
+// TLS, and vice versa.
+const useDatabaseSsl = process.env.DATABASE_SSL
+  ? process.env.DATABASE_SSL === 'true'
+  : process.env.NODE_ENV === 'production';
+
 export const dataSourceOptions: DataSourceOptions = {
   type: 'postgres',
   url: process.env.DATABASE_URL,
   poolSize: process.env.DB_POOL_SIZE ? Number(process.env.DB_POOL_SIZE) : 10,
+  ssl: useDatabaseSsl ? { rejectUnauthorized: false } : false,
   entities: [
     User,
     RefreshToken,
