@@ -1,5 +1,6 @@
 version: '3.9'
 
+# Local development only. The credentials below are throwaway defaults; never reuse them elsewhere.
 services:
   postgres:
     image: pgvector/pgvector:pg17
