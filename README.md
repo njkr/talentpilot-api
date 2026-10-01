@@ -6,6 +6,17 @@ NestJS backend for TalentPilot, an AI-assisted ATS resume optimizer and job-appl
 
 Applicants rarely know why a resume is filtered out or how to tailor it to a role without inventing experience. This API parses a resume and a job description, scores the match, and proposes edits that are checked against the resume so they don't introduce unsupported claims. For the same role it can also generate a cover letter, interview questions, a learning roadmap, company research and a salary estimate. Long-running AI work runs in background workers, and usage is metered through credits and Stripe subscriptions.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="https://raw.githubusercontent.com/njkr/talentpilot-fe/dev/docs/screenshots/05-ats-report.png" alt="ATS report"><br><sub>ATS report: overall score, weighted score breakdown and keyword coverage</sub></td>
+    <td><img src="https://raw.githubusercontent.com/njkr/talentpilot-fe/dev/docs/screenshots/06-interview-prep.png" alt="Interview prep"><br><sub>Interview prep: questions grounded in the resume, with answer feedback</sub></td>
+  </tr>
+</table>
+
+More screenshots are in the web client repository: https://github.com/njkr/talentpilot-fe
+
 ## Key features
 
 - Email/password auth with OTP email verification, password reset, short-lived JWT access tokens, rotating httpOnly refresh cookies, and per-device session listing/revocation.
