@@ -88,7 +88,6 @@ export class AuthService {
     });
     if (!user || user.isVerified) return; // silent no-op — never confirm an email exists
     const code = await this.otps.issueOtp(user.id); // throws otpCooldown if too soon
-    console.log('resendOtp code', code); // ← for dev convenience; never log in prod
     this.events.emit('otp.resend', { user, code });
   }
 
